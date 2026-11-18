@@ -47,6 +47,15 @@ HttpOnly, SameSite=Strict cookies; HTTPS installations use a Secure `__Host-`
 cookie. Browser mutations require a CSRF token, JSON content type and accepted
 origin. CLI/machine clients use opaque bearer tokens with server-side records.
 
+Optional remembered-browser credentials are opaque random tokens, hashed at rest
+and bound to a keyed client-IP hash and user. An absolute 30-day expiry does not
+slide on login. Sessions issued with trust link to its database row: revocation
+cascades to those sessions, and request authentication checks the cookie/IP again.
+Password and verified Google identity are still required at login; sensitive
+factor/password operations still require fresh factors. Legacy sessions remain
+unlinked after the additive schema-3 migration. IP matching is a risk check and
+does not identify physical hardware. See [trusted browsers](operations.md#trusted-browsers).
+
 The image starts PostgreSQL and Node under separate operating-system identities.
 PostgreSQL listens on a Unix socket only, with peer authentication. Tini and the
 entrypoint supervise both processes; one exiting stops the other. Only port 8080

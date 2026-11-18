@@ -74,3 +74,14 @@ CREATE TABLE IF NOT EXISTS google_flows (
   token_hash text PRIMARY KEY, browser_hash text NOT NULL, box text NOT NULL,
   expires_at timestamptz NOT NULL
 );
+
+-- Version 3: opaque, IP-bound browser trust with revocable linked sessions.
+CREATE TABLE IF NOT EXISTS trusted_browsers (
+  id uuid PRIMARY KEY, user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash text NOT NULL UNIQUE, ip_hash text NOT NULL, label text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), last_used_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS trusted_browser_user ON trusted_browsers(user_id);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS trusted_browser_id uuid REFERENCES trusted_browsers(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS trusted_browser_sessions ON sessions(trusted_browser_id) WHERE trusted_browser_id IS NOT NULL;

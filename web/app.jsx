@@ -28,6 +28,8 @@ async function api(path, method = "GET", body) {
     : await response.text();
   if (!response.ok) {
     if (data.code === "EMAIL_DOMAIN_NOT_ALLOWED") location.replace("/info");
+    if (data.code === "SESSION_REAUTH_REQUIRED" && csrf)
+      location.replace("/signin");
     throw new Error(data.error || "Request failed.");
   }
   if (data.csrf) csrf = data.csrf;
@@ -570,6 +572,7 @@ function App() {
                     signedIn(
                       await api("/auth/mfa/confirm", "POST", {
                         code: data.get("code"),
+                        rememberBrowser: data.get("rememberBrowser") === "on",
                       }),
                     ),
                   )
@@ -582,6 +585,7 @@ function App() {
                   autoComplete="one-time-code"
                   inputMode="numeric"
                 />
+                <RememberBrowser />
               </Form>
             </>
           ) : (
@@ -593,6 +597,7 @@ function App() {
                   signedIn(
                     await api("/auth/mfa/verify", "POST", {
                       code: data.get("code"),
+                      rememberBrowser: data.get("rememberBrowser") === "on",
                     }),
                   ),
                 )
@@ -604,6 +609,7 @@ function App() {
                 required
                 autoComplete="one-time-code"
               />
+              <RememberBrowser />
             </Form>
           )}
           <Button
@@ -1096,6 +1102,7 @@ function App() {
                 signedIn(
                   await api("/auth/mfa/confirm", "POST", {
                     code: data.get("code"),
+                    rememberBrowser: data.get("rememberBrowser") === "on",
                   }),
                 ),
               )
@@ -1113,6 +1120,21 @@ function App() {
     </div>
   );
 }
+function RememberBrowser() {
+  return (
+    <>
+      <label className="check">
+        <input type="checkbox" name="rememberBrowser" />
+        Trust this browser for 30 days on this IP
+      </label>
+      <p className="muted small">
+        Use only on a private device. You still sign in normally; a network
+        change or expired trust requires two-factor verification again.
+      </p>
+    </>
+  );
+}
+
 function Logo() {
   return (
     <div className="logo" aria-label="SecretManager by Maity">
@@ -2158,6 +2180,12 @@ function Audit({ act, projects, user }) {
 }
 function Security({ user, act, setEnrollment, setModal, setUser }) {
   const data = useData(() => api("/auth/sessions"), [], act);
+  const [browserTick, setBrowserTick] = useState(0);
+  const trusted = useData(
+    () => api("/auth/trusted-browsers"),
+    [browserTick],
+    act,
+  );
   return (
     <>
       <Panel
@@ -2285,6 +2313,64 @@ function Security({ user, act, setEnrollment, setModal, setUser }) {
           </Form>
         </Panel>
       )}
+      <Panel
+        title="Trusted browsers"
+        description="Trust lasts at most 30 days on the same IP. Forgetting a browser also revokes sessions that relied on its trust."
+        action={
+          <Button
+            kind="danger"
+            onClick={() =>
+              act(async () => {
+                const result = await api(
+                  "/auth/trusted-browsers",
+                  "DELETE",
+                  {},
+                );
+                if (result.sessionRevoked) setUser(null);
+                else setBrowserTick((value) => value + 1);
+              })
+            }
+          >
+            Forget all browsers
+          </Button>
+        }
+      >
+        {trusted?.browsers.length ? (
+          trusted.browsers.map((browser) => (
+            <div className="list-row" key={browser.id}>
+              <div>
+                <strong className="trusted-browser-label">
+                  {browser.current ? "This browser" : browser.label}
+                </strong>
+                <small>
+                  Last used {date(browser.last_used_at)} · Expires{" "}
+                  {date(browser.expires_at)}
+                </small>
+              </div>
+              <Button
+                kind="danger quiet"
+                onClick={() =>
+                  act(async () => {
+                    const result = await api(
+                      "/auth/trusted-browsers/" + browser.id,
+                      "DELETE",
+                      {},
+                    );
+                    if (result.sessionRevoked) setUser(null);
+                    else setBrowserTick((value) => value + 1);
+                  })
+                }
+              >
+                Forget
+              </Button>
+            </div>
+          ))
+        ) : (
+          <Empty title="No trusted browsers">
+            Select the trust option when you complete two-factor verification.
+          </Empty>
+        )}
+      </Panel>
       <Panel
         title="Active sessions"
         action={

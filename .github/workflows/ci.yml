@@ -70,7 +70,7 @@ jobs:
             sleep 2
           done
           exit 1
-      - name: Exercise identity and encrypted persistence
+      - name: Exercise identities, CLI and encrypted persistence
         run: docker exec -i secretmanager-test node --input-type=module < scripts/container-smoke.js
       - name: Create encrypted PostgreSQL backup
         run: docker exec --user secretmanager secretmanager-test node src/cli.js backup --file /backups/smoke.smbak
@@ -88,7 +88,13 @@ jobs:
           docker exec -i secretmanager-test node --input-type=module - --verify < scripts/container-smoke.js
       - name: Verify supervision
         run: |
-          docker exec --user postgres secretmanager-test pg_ctl -D /var/lib/postgresql/data stop -m fast
+          test "$(docker inspect --format '{{.State.Running}}' secretmanager-test)" = true
+          set +e
+          docker exec --user postgres secretmanager-test pg_ctl -D /var/lib/postgresql/data stop -m fast -W
+          control_status=$?
+          set -e
+          # Supervision can stop the container before docker exec reports success.
+          if [ "$control_status" != 0 ] && [ "$control_status" != 137 ]; then exit "$control_status"; fi
           test "$(docker wait secretmanager-test)" != 0
       - name: Clean up disposable container and volumes
         if: always()

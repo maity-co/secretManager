@@ -89,7 +89,7 @@ Local tests use disposable embedded PostgreSQL through PGlite. Set
 `TEST_DATABASE_URL` to a loopback PostgreSQL database named `secretmanager_test*`
 to run the same API suite against the real server. Never point tests at a live
 service database. CI exercises Node.js 20/24 with PostgreSQL 17 and independently
-builds the Docker image, tests startup and persistence, performs a real encrypted
+builds the Docker image, tests human/machine CLI access, startup and persistence, performs a real encrypted
 backup/restore, and checks process supervision. CI does not deploy or publish an
 image. The public repository also runs a checksum-pinned Gitleaks scan.
 

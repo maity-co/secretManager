@@ -1,6 +1,7 @@
 // Executed inside an isolated CI container. All identities and data are disposable.
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import * as OTPAuth from "otpauth";
 const base = "http://127.0.0.1:8080",
   file = "/tmp/secretmanager-smoke.json";
@@ -39,11 +40,12 @@ try {
       throw new Error("Persistent data did not survive restart/restore.");
   } else {
     const setupToken = (await readFile("/keys/setup-token", "utf8")).trim();
+    const ownerPassword = randomBytes(24).toString("base64url");
     await call("/bootstrap", "POST", {
       setupToken,
       email: "owner@example.com",
       name: "Container Test",
-      password: randomBytes(24).toString("base64url"),
+      password: ownerPassword,
     });
     const enrolled = await call("/auth/mfa/start", "POST", {});
     const code = new OTPAuth.TOTP({
@@ -52,7 +54,10 @@ try {
       digits: 6,
       period: 30,
     }).generate();
-    await call("/auth/mfa/confirm", "POST", { code, delivery: "token" });
+    const confirmed = await call("/auth/mfa/confirm", "POST", {
+      code,
+      delivery: "token",
+    });
     const projectId = (
         await call("/projects", "POST", { name: "Container Example" })
       ).id,
@@ -65,6 +70,85 @@ try {
         path: "/",
       })
     ).id;
+    const machine = (
+      await call(`/projects/${projectId}/machines`, "POST", {
+        name: "CLI Test Worker",
+      })
+    ).id;
+    const role = (
+      await call(`/projects/${projectId}/roles`, "POST", {
+        name: "CLI Reader",
+        permissions: [
+          "project.read",
+          "secrets.list",
+          "secrets.read",
+          "secrets.export",
+        ],
+      })
+    ).id;
+    await call(`/projects/${projectId}/bindings`, "POST", {
+      roleId: role,
+      principalType: "machine",
+      principalId: machine,
+      environment: "development",
+      path: "/",
+    });
+    const credential = await call(
+      `/projects/${projectId}/machines/${machine}/credentials`,
+      "POST",
+      { days: 1 },
+    );
+    await mkdir("/tmp/secretmanager-cli", { mode: 0o700 });
+    const clientEnv = {
+      ...process.env,
+      SM_AUTH_FILE: "/tmp/secretmanager-cli/auth.json",
+    };
+    function cli(args, input) {
+      const result = spawnSync(process.execPath, ["src/cli.js", ...args], {
+        env: clientEnv,
+        input,
+        encoding: "utf8",
+      });
+      if (result.status !== 0) throw new Error("CLI smoke check failed.");
+      return result.stdout;
+    }
+    cli(
+      ["login", "--url", base],
+      JSON.stringify({
+        email: "owner@example.com",
+        password: ownerPassword,
+        code: confirmed.recoveryCodes[0],
+      }),
+    );
+    const humanProjects = JSON.parse(cli(["projects"]));
+    if (!humanProjects.projects.some((project) => project.id === projectId))
+      throw new Error("Human CLI access failed.");
+    cli(["logout"]);
+    cli(
+      ["machine-login", "--url", base],
+      JSON.stringify({
+        clientId: machine,
+        clientSecret: credential.clientSecret,
+      }),
+    );
+    if (cli(["get", "--project", projectId, "--key", "EXAMPLE"]) !== value)
+      throw new Error("CLI read failed.");
+    if (
+      cli([
+        "run",
+        "--project",
+        projectId,
+        "--",
+        process.execPath,
+        "-e",
+        'process.stdout.write(process.env.EXAMPLE||"")',
+        "--",
+        "--path",
+        "/child-argument-not-a-secret-scope",
+      ]) !== value
+    )
+      throw new Error("CLI environment injection failed.");
+    cli(["logout"]);
     await writeFile(
       file,
       JSON.stringify({ bearer, projectId, secretId, value }),

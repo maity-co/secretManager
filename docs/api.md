@@ -63,7 +63,9 @@ pagination/streaming or external immutable sink in this release.
 
 ## CLI
 
-`SM_AUTH_FILE` selects an owner-only session file. Otherwise it is under
+`SM_AUTH_FILE` selects an owner-only session file. Its parent must be a private
+mode-0700 directory, not a shared folder or symlink; the CLI never changes an
+existing parent directory’s permissions. Otherwise it is under
 `$XDG_CONFIG_HOME/secretmanager/auth.json`, falling back to the user's config
 directory. `SM_URL` can supply the login origin. The CLI rejects non-HTTPS remote
 origins and redirects. Run logout to revoke the active session and delete the

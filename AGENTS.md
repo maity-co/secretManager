@@ -95,7 +95,7 @@ public registry; do not inherit a private package registry or credentials.
 - `npm run format:check`: repository formatting check.
 
 CI separately tests Node.js 20/24 with real PostgreSQL, builds and exercises the
-single-container image, verifies encrypted backup/restore and process
+single-container image and CLI, verifies encrypted backup/restore and process
 supervision, and secret-scans files and Git history. Report actual hosted results
 rather than describing configured checks as if they have already passed.
 

@@ -17,11 +17,14 @@ import { dirname, join, resolve } from "node:path";
 import { parseEnv } from "./env-format.js";
 import { token, digest } from "./security.js";
 import { randomUUID } from "node:crypto";
+class CliError extends Error {}
 const args = process.argv.slice(2),
   command = args.shift();
 const flag = (name) => {
-  const index = args.indexOf("--" + name);
-  return index < 0 ? null : args[index + 1];
+  const separator = args.indexOf("--");
+  const options = separator < 0 ? args : args.slice(0, separator);
+  const index = options.indexOf("--" + name);
+  return index < 0 ? null : options[index + 1];
 };
 const configFile =
   process.env.SM_AUTH_FILE ||
@@ -34,16 +37,18 @@ async function input() {
   let value = "";
   for await (const chunk of process.stdin) {
     value += chunk;
-    if (value.length > 384 * 1024) throw new Error("Input too large.");
+    if (value.length > 384 * 1024) throw new CliError("Input too large.");
   }
   return value ? JSON.parse(value) : {};
 }
 async function save(config) {
   const dir = dirname(configFile);
   await mkdir(dir, { recursive: true, mode: 0o700 });
-  if ((await lstat(dir)).isSymbolicLink())
-    throw new Error("Auth directory must not be a symlink.");
-  await chmod(dir, 0o700);
+  const directoryInfo = await lstat(dir);
+  if (directoryInfo.isSymbolicLink() || (directoryInfo.mode & 0o077) !== 0)
+    throw new CliError(
+      "Choose a private, owner-only auth directory (mode 0700) that is not a symlink.",
+    );
   const temp = join(dir, ".auth-" + randomBytes(8).toString("hex"));
   await writeFile(temp, JSON.stringify(config), { mode: 0o600, flag: "wx" });
   await rename(temp, configFile);
@@ -59,12 +64,12 @@ function safeUrl(value) {
     (url.protocol !== "https:" &&
       !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
   )
-    throw new Error("Use an HTTPS origin or loopback development origin.");
+    throw new CliError("Use an HTTPS origin or loopback development origin.");
   return url.origin;
 }
 async function request(origin, path, method = "GET", body, bearer) {
   if (!path.startsWith("/api/") || path.includes(".."))
-    throw new Error("Use an /api/ path.");
+    throw new CliError("Use an /api/ path.");
   const response = await fetch(origin + path, {
     method,
     headers: {
@@ -75,7 +80,8 @@ async function request(origin, path, method = "GET", body, bearer) {
     signal: AbortSignal.timeout(30000),
     redirect: "error",
   });
-  if (!response.ok) throw new Error(`Request rejected (${response.status}).`);
+  if (!response.ok)
+    throw new CliError(`Request rejected (${response.status}).`);
   return response.headers.get("content-type")?.includes("application/json")
     ? response.json()
     : response.text();
@@ -85,7 +91,7 @@ async function runChild(program, childArgs, options = {}) {
   await new Promise((yes, no) => {
     child.once("error", no);
     child.once("exit", (code) =>
-      code === 0 ? yes() : no(new Error("Child command failed.")),
+      code === 0 ? yes() : no(new CliError("Child command failed.")),
     );
   });
 }
@@ -94,7 +100,7 @@ async function main() {
     const dir = resolve(flag("directory") || ".local/keys");
     await mkdir(dir, { recursive: true, mode: 0o700 });
     if ((await lstat(dir)).isSymbolicLink())
-      throw new Error("Key directory must not be a symlink.");
+      throw new CliError("Key directory must not be a symlink.");
     await chmod(dir, 0o700);
     for (const [name, value] of [
       ["master.key", randomBytes(32).toString("base64")],
@@ -115,7 +121,7 @@ async function main() {
   if (command === "owner-reset-link") {
     const filename = flag("file");
     if (!filename)
-      throw new Error("--file is required for protected recovery output.");
+      throw new CliError("--file is required for protected recovery output.");
     const origin = safeUrl(
       flag("url") || process.env.APP_ORIGIN || "http://localhost:8080",
     );
@@ -140,7 +146,7 @@ async function main() {
             "SELECT id,email FROM users WHERE owner=true FOR UPDATE",
           )
         ).rows[0];
-        if (!owner) throw new Error("No owner exists.");
+        if (!owner) throw new CliError("No owner exists.");
         await tx.query("UPDATE invitations SET used=true WHERE email=$1", [
           owner.email,
         ]);
@@ -191,7 +197,7 @@ async function main() {
   }
   if (command === "backup" || command === "restore") {
     const filename = flag("file");
-    if (!filename) throw new Error("--file is required.");
+    if (!filename) throw new CliError("--file is required.");
     const key = Buffer.from(
       (
         await readFile(
@@ -201,7 +207,7 @@ async function main() {
       ).trim(),
       "base64",
     );
-    if (key.length !== 32) throw new Error("Invalid encryption key.");
+    if (key.length !== 32) throw new CliError("Invalid encryption key.");
     if (command === "backup") {
       const nonce = randomBytes(12),
         cipher = createCipheriv("aes-256-gcm", key, nonce);
@@ -220,7 +226,7 @@ async function main() {
       const exited = new Promise((yes, no) => {
         child.once("error", no);
         child.once("exit", (code) =>
-          code === 0 ? yes() : no(new Error("Backup process failed.")),
+          code === 0 ? yes() : no(new CliError("Backup process failed.")),
         );
       });
       try {
@@ -244,12 +250,12 @@ async function main() {
       return;
     }
     if (!args.includes("--confirm-replace"))
-      throw new Error(
+      throw new CliError(
         "Restore replaces the database; --confirm-replace is required.",
       );
     const bytes = await readFile(filename);
     if (bytes.length < 34 || bytes.subarray(0, 6).toString() !== "SMBAK1")
-      throw new Error("Invalid backup format.");
+      throw new CliError("Invalid backup format.");
     const cipher = createDecipheriv("aes-256-gcm", key, bytes.subarray(6, 18));
     cipher.setAAD(Buffer.from("SMBAK1"));
     cipher.setAuthTag(bytes.subarray(-16));
@@ -301,7 +307,7 @@ async function main() {
         delivery: "token",
       });
       if (session.enrollmentRequired)
-        throw new Error(
+        throw new CliError(
           "Enroll an authenticator in the web UI before using CLI login.",
         );
       if (session.pending)
@@ -346,7 +352,7 @@ async function main() {
   const config = JSON.parse(await readFile(configFile, "utf8")),
     origin = safeUrl(config.origin);
   if (new Date(config.expiresAt) <= new Date())
-    throw new Error("Session expired. Sign in again.");
+    throw new CliError("Session expired. Sign in again.");
   if (command === "projects") {
     console.log(
       JSON.stringify(
@@ -382,7 +388,7 @@ async function main() {
   const projectId = flag("project"),
     environment = flag("environment") || "development",
     path = flag("path") || "/";
-  if (!projectId) throw new Error("--project is required.");
+  if (!projectId) throw new CliError("--project is required.");
   const base = "/api/projects/" + encodeURIComponent(projectId),
     query = "?" + new URLSearchParams({ environment, path });
   if (command === "get") {
@@ -396,7 +402,7 @@ async function main() {
       row = list.secrets.find(
         (item) => item.key === flag("key") && !item.deleted_at,
       );
-    if (!row) throw new Error("Secret not found.");
+    if (!row) throw new CliError("Secret not found.");
     const value = await request(
       origin,
       base + "/secrets/" + row.id + "/value",
@@ -420,16 +426,18 @@ async function main() {
   }
   const separator = args.indexOf("--");
   if (separator < 0 || !args[separator + 1])
-    throw new Error("run requires -- executable [arguments].");
+    throw new CliError("run requires -- executable [arguments].");
   await runChild(args[separator + 1], args.slice(separator + 2), {
     stdio: "inherit",
     env: { ...process.env, ...parseEnv(content) },
     shell: false,
   });
 }
-main().catch(() => {
+main().catch((error) => {
   console.error(
-    "Command failed. Check arguments, authorization and service availability. Sensitive diagnostics suppressed.",
+    error instanceof CliError
+      ? error.message
+      : "Command failed. Check arguments, authorization and service availability. Sensitive diagnostics suppressed.",
   );
   process.exitCode = 1;
 });

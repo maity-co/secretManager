@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { mkdir, copyFile } from "node:fs/promises";
+import { mkdir, copyFile, cp } from "node:fs/promises";
 await mkdir("dist", { recursive: true });
 await build({
   entryPoints: ["web/app.jsx"],
@@ -13,3 +13,5 @@ await build({
 await copyFile("web/index.html", "dist/index.html");
 
 await copyFile("web/info.css", "dist/info.css");
+await copyFile("web/brand.css", "dist/brand.css");
+await cp("web/assets", "dist/assets", { recursive: true });

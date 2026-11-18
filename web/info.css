@@ -1,13 +1,7 @@
 :root {
-  font-family:
-    Inter,
-    ui-sans-serif,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-  color: #183047;
-  background: #f7f9fc;
+  font-family: var(--font-sans);
+  color: var(--text);
+  background: var(--background);
   font-synthesis: none;
   line-height: 1.6;
 }
@@ -26,7 +20,7 @@ a {
   text-decoration: none;
 }
 a:focus-visible {
-  outline: 3px solid #0e8c80;
+  outline: 3px solid var(--primary);
   outline-offset: 6px;
   border-radius: 4px;
 }
@@ -35,7 +29,7 @@ a:focus-visible {
   align-items: center;
   justify-content: space-between;
   padding: 30px 0;
-  border-bottom: 1px solid #e0e7ef;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .info-logo {
   display: flex;
@@ -44,23 +38,9 @@ a:focus-visible {
   font-size: 19px;
   letter-spacing: -0.4px;
 }
-.info-logo strong {
-  font-weight: 450;
-}
-.info-mark {
-  display: grid;
-  place-items: center;
-  background: #0e998a;
-  color: #fff;
-  border-radius: 9px;
-  width: 36px;
-  height: 38px;
-  font-weight: 800;
-  font-size: 23px;
-}
 .info-header-link {
   font-size: 13px;
-  color: #66788d;
+  color: var(--muted);
 }
 .info-hero {
   display: grid;
@@ -73,7 +53,7 @@ a:focus-visible {
   font-size: 10px;
   letter-spacing: 2px;
   font-weight: 700;
-  color: #608294;
+  color: var(--muted);
   margin: 0 0 22px;
 }
 .info-intro h1 {
@@ -86,7 +66,7 @@ a:focus-visible {
 .info-lead {
   font-size: 16px;
   line-height: 1.9;
-  color: #708295;
+  color: var(--muted);
   max-width: 520px;
   margin: 0;
 }
@@ -101,39 +81,39 @@ a:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 18px;
-  background: #0e8c80;
-  color: white;
-  border: 1px solid #0e8c80;
+  background: var(--primary);
+  color: var(--primary-text);
+  border: 1px solid var(--primary);
   border-radius: 7px;
   padding: 12px 17px;
   font-size: 13px;
   font-weight: 600;
 }
 .info-primary:hover {
-  background: #0c756b;
+  background: var(--primary-hover);
 }
 .info-secondary {
   font-size: 13px;
-  color: #435d75;
-  border-bottom: 1px solid #c3cfdc;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
 }
 .info-note {
   font-size: 11px;
-  color: #99a6b5;
+  color: var(--muted);
   margin-top: 21px;
 }
 .info-access {
   padding: 30px;
-  background: #fff;
-  border: 1px solid #dce5ef;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
   border-radius: 13px;
-  box-shadow: 0 10px 45px #102d4505;
+  box-shadow: 0 10px 45px #0003;
 }
 .info-status {
   display: inline-block;
-  border: 1px solid #d8ebe6;
-  background: #f0f8f5;
-  color: #368373;
+  border: 1px solid var(--success-border);
+  background: var(--success-bg);
+  color: var(--success);
   padding: 3px 9px;
   border-radius: 5px;
   font-size: 10px;
@@ -149,30 +129,30 @@ a:focus-visible {
 .info-access p {
   font-size: 13px;
   line-height: 1.8;
-  color: #8390a1;
+  color: var(--muted);
   margin: 0;
 }
 .info-access p strong {
   font-weight: 600;
-  color: #536e84;
+  color: var(--text);
   overflow-wrap: anywhere;
 }
 .info-team {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-top: 1px solid #e5ebf2;
+  border-top: 1px solid var(--border-subtle);
   margin-top: 27px;
   padding-top: 20px;
   font-size: 13px;
-  color: #0e8c80;
+  color: var(--primary);
   font-weight: 600;
 }
 .info-features {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 35px;
-  border-top: 1px solid #e0e7ef;
+  border-top: 1px solid var(--border-subtle);
   padding: 35px 0 45px;
 }
 .info-feature-icon {
@@ -180,9 +160,9 @@ a:focus-visible {
   place-items: center;
   width: 33px;
   height: 33px;
-  background: #e9eff5;
+  background: var(--surface-high);
   border-radius: 7px;
-  color: #5d7e94;
+  color: var(--accent-text);
   font-size: 20px;
   margin-bottom: 12px;
 }
@@ -194,7 +174,7 @@ a:focus-visible {
 .info-features p {
   font-size: 12px;
   line-height: 1.9;
-  color: #7b8b9c;
+  color: var(--muted);
   margin: 0;
   max-width: 300px;
 }
@@ -203,8 +183,8 @@ a:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 25px;
-  background: #edf3f8;
-  border: 1px solid #e1e8f0;
+  background: var(--surface-high);
+  border: 1px solid var(--border-subtle);
   border-radius: 10px;
   padding: 25px 27px;
   margin: 10px 0 60px;
@@ -216,14 +196,14 @@ a:focus-visible {
 }
 .info-start p {
   font-size: 12px;
-  color: #7b8d9f;
+  color: var(--muted);
   margin: 0;
 }
 .info-start code {
   font-family: ui-monospace, monospace;
   font-size: 12px;
-  background: #fff;
-  border: 1px solid #dfe7ef;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px 15px;
   white-space: nowrap;
@@ -232,10 +212,10 @@ a:focus-visible {
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  border-top: 1px solid #e0e7ef;
+  border-top: 1px solid var(--border-subtle);
   padding: 23px 0 30px;
   font-size: 11px;
-  color: #93a1b1;
+  color: var(--muted);
 }
 .info-footer a {
   text-decoration: underline;
@@ -293,4 +273,43 @@ a:focus-visible {
   .info-hero {
     padding-top: 42px;
   }
+}
+
+.info-logo {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
+}
+.info-wordmark {
+  width: 124px;
+  height: auto;
+  display: block;
+}
+.info-product {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.info-primary {
+  color: var(--primary-text);
+}
+.info-access,
+.info-start {
+  background: var(--surface-raised);
+}
+.info-feature-icon {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.info-eyebrow {
+  color: var(--accent-text);
+}
+.info-status {
+  color: var(--success);
+}
+.info-header-link:hover,
+.info-secondary:hover {
+  color: var(--accent-text);
 }

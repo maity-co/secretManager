@@ -415,6 +415,9 @@ function App() {
           </div>
         </div>
         <div className="auth-card">
+          <div className="auth-mobile-brand">
+            <Logo />
+          </div>
           <div className="eyebrow">
             {boot ? "INITIAL SETUP" : "WORKSPACE ACCESS"}
           </div>
@@ -618,6 +621,16 @@ function App() {
         </div>
       </main>
     );
+  const signOut = () =>
+    act(async () => {
+      await api("/auth/logout", "POST", {});
+      setUser(null);
+      setProjects([]);
+      setProjectId("");
+      setModal(null);
+      setEnrollment(null);
+      setRecovery(null);
+    });
   const projectScope = { projectId, environment, path };
   const rootProjectPermission = (permission) =>
     user.owner ||
@@ -650,72 +663,60 @@ function App() {
     <div className="layout">
       <aside className="sidebar">
         <Logo />
-        <div className="workspace-label">YOUR WORKSPACE</div>
-        <nav aria-label="Project navigation">
-          {[
-            ["secrets", "▦", "Secrets"],
-            ["access", "◈", "Project access"],
-            ["machines", "⌘", "Machine identities"],
-          ]
-            .filter(([id]) =>
-              id === "access"
-                ? rootProjectPermission("project.roles.manage")
-                : id === "machines"
-                  ? rootProjectPermission("project.machines.manage")
-                  : true,
-            )
-            .map(([id, icon, label]) => (
-              <button
-                key={id}
-                className={page === id ? "active" : ""}
-                onClick={() => setPage(id)}
-              >
-                <span>{icon}</span>
-                {label}
-              </button>
-            ))}
-        </nav>
-        <div className="workspace-label">ORGANIZATION</div>
-        <nav aria-label="Organization navigation">
-          {[
-            ["users", "♙", "People & invitations"],
-            ["roles", "◇", "Organization roles"],
-            ["audit", "≡", "Audit trail"],
-            ["settings", "⚙", "Settings"],
-            ["security", "◎", "Account security"],
-          ]
-            .filter(([id]) => navigationPermission(id))
-            .map(([id, icon, label]) => (
-              <button
-                key={id}
-                className={page === id ? "active" : ""}
-                onClick={() => setPage(id)}
-              >
-                <span>{icon}</span>
-                {label}
-              </button>
-            ))}
-        </nav>
+        <div className="sidebar-scroll">
+          <div className="workspace-label">YOUR WORKSPACE</div>
+          <nav aria-label="Project navigation">
+            {[
+              ["secrets", "▦", "Secrets"],
+              ["access", "◈", "Project access"],
+              ["machines", "⌘", "Machine identities"],
+            ]
+              .filter(([id]) =>
+                id === "access"
+                  ? rootProjectPermission("project.roles.manage")
+                  : id === "machines"
+                    ? rootProjectPermission("project.machines.manage")
+                    : true,
+              )
+              .map(([id, icon, label]) => (
+                <button
+                  key={id}
+                  className={page === id ? "active" : ""}
+                  onClick={() => setPage(id)}
+                >
+                  <span>{icon}</span>
+                  {label}
+                </button>
+              ))}
+          </nav>
+          <div className="workspace-label">ORGANIZATION</div>
+          <nav aria-label="Organization navigation">
+            {[
+              ["users", "♙", "People & invitations"],
+              ["roles", "◇", "Organization roles"],
+              ["audit", "≡", "Audit trail"],
+              ["settings", "⚙", "Settings"],
+              ["security", "◎", "Account security"],
+            ]
+              .filter(([id]) => navigationPermission(id))
+              .map(([id, icon, label]) => (
+                <button
+                  key={id}
+                  className={page === id ? "active" : ""}
+                  onClick={() => setPage(id)}
+                >
+                  <span>{icon}</span>
+                  {label}
+                </button>
+              ))}
+          </nav>
+        </div>
         <div className="sidebar-bottom">
           <div className="avatar">{user.name.slice(0, 1)}</div>
           <div>
             <strong>{user.name}</strong>
             <small>{user.owner ? "Owner" : user.email}</small>
           </div>
-          <button
-            className="logout"
-            aria-label="Sign out"
-            onClick={() =>
-              act(async () => {
-                await api("/auth/logout", "POST", {});
-                setUser(null);
-                setProjects([]);
-                setProjectId("");
-              })
-            }
-          >
-            ↗
-          </button>
         </div>
       </aside>
       <div className="main">
@@ -725,7 +726,12 @@ function App() {
             <span className="slash">/</span>
             <strong>{selected?.name || "Organization"}</strong>
           </div>
-          <Badge tone="green">● Self-hosted</Badge>
+          <div className="topbar-actions">
+            <Badge tone="green">● Self-hosted</Badge>
+            <Button onClick={signOut} disabled={busy}>
+              Sign out
+            </Button>
+          </div>
         </header>
         <main className="content">
           <div className="page-title">
@@ -1109,11 +1115,15 @@ function App() {
 }
 function Logo() {
   return (
-    <div className="logo">
-      <span className="logo-mark">S</span>
-      <strong>
-        Secret<span>Manager</span>
-      </strong>
+    <div className="logo" aria-label="SecretManager by Maity">
+      <img
+        className="brand-wordmark"
+        src="/assets/maity-logo.png"
+        width="124"
+        height="32"
+        alt="Maity"
+      />
+      <span className="brand-product">SecretManager</span>
     </div>
   );
 }

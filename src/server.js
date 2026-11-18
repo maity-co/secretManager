@@ -44,6 +44,8 @@ async function main() {
     origin: process.env.APP_ORIGIN || "http://localhost:8080",
     mailEnvironment,
     trustProxy,
+    allowedEmailDomains: process.env.ALLOWED_EMAIL_DOMAINS || "",
+    publicOperatorName: process.env.PUBLIC_OPERATOR_NAME || "",
   });
   const port = Number(process.env.PORT || 8080);
   if (!Number.isInteger(port) || port < 1 || port > 65535)

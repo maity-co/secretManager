@@ -25,21 +25,23 @@ outside this service. The owner account cannot be disabled through the API.
 
 ## Configuration
 
-| Setting                            | Default / purpose                                                 |
-| ---------------------------------- | ----------------------------------------------------------------- |
-| `APP_ORIGIN`                       | `http://localhost:8080`; exact browser origin and invitation base |
-| `PORT`                             | `8080`; container web listener                                    |
-| `BIND_ADDRESS`                     | `0.0.0.0`; rely on the loopback host port mapping                 |
-| `TRUST_PROXY_HOPS`                 | `0`; explicitly set trusted reverse-proxy hops                    |
-| `MASTER_KEY_FILE`                  | `/keys/master.key`; base64-encoded 32-byte key                    |
-| `SETUP_TOKEN_FILE`                 | `/keys/setup-token`; bootstrap admission token                    |
-| `PGHOST` / `PGUSER` / `PGDATABASE` | Unix socket / `secretmanager` / `secretmanager`                   |
-| `DATABASE_URL`                     | Optional for a separately run backend or development              |
-| `RESEND_API_KEY_FILE`              | Optional protected mounted Resend key file                        |
-| `RESEND_API_KEY`                   | Alternative runtime-injected email key; never a build argument    |
-| `EMAIL_FROM`                       | Plain sender email for deployment-managed email                   |
-| `BACKUP_DIRECTORY`                 | `/backups`; private encrypted archive destination                 |
-| `BACKUP_INTERVAL_HOURS`            | `24`; `0` disables; otherwise 1–168 whole hours                   |
+| Setting                            | Default / purpose                                                                               |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `APP_ORIGIN`                       | `http://localhost:8080`; exact browser origin and invitation base                               |
+| `PORT`                             | `8080`; container web listener                                                                  |
+| `BIND_ADDRESS`                     | `0.0.0.0`; rely on the loopback host port mapping                                               |
+| `TRUST_PROXY_HOPS`                 | `0`; explicitly set trusted reverse-proxy hops                                                  |
+| `ALLOWED_EMAIL_DOMAINS`            | Blank allows any valid email; exact comma-separated domains restrict humans and mail recipients |
+| `PUBLIC_OPERATOR_NAME`             | Optional public organization name shown on `/info`                                              |
+| `MASTER_KEY_FILE`                  | `/keys/master.key`; base64-encoded 32-byte key                                                  |
+| `SETUP_TOKEN_FILE`                 | `/keys/setup-token`; bootstrap admission token                                                  |
+| `PGHOST` / `PGUSER` / `PGDATABASE` | Unix socket / `secretmanager` / `secretmanager`                                                 |
+| `DATABASE_URL`                     | Optional for a separately run backend or development                                            |
+| `RESEND_API_KEY_FILE`              | Optional protected mounted Resend key file                                                      |
+| `RESEND_API_KEY`                   | Alternative runtime-injected email key; never a build argument                                  |
+| `EMAIL_FROM`                       | Plain sender email for deployment-managed email                                                 |
+| `BACKUP_DIRECTORY`                 | `/backups`; private encrypted archive destination                                               |
+| `BACKUP_INTERVAL_HOURS`            | `24`; `0` disables; otherwise 1–168 whole hours                                                 |
 
 The stock compose file passes the origin and proxy settings. Add other runtime
 settings in your private compose override or deployment system; do not commit
@@ -47,6 +49,38 @@ credentials. A separately run backend requires the same key/setup files and a
 reachable PostgreSQL database. `node src/cli.js init --directory .local/keys`
 generates protected development files without overwriting existing ones. Pass
 their paths through `MASTER_KEY_FILE` and `SETUP_TOKEN_FILE` when starting Node.
+
+## Hosted email policy and public page
+
+Set `ALLOWED_EMAIL_DOMAINS` to a comma-separated list of exact domains for a
+restricted installation, for example `example.com`. Set `PUBLIC_OPERATOR_NAME`
+to the organization name displayed on the public page. Both settings are passed
+by the supplied Compose file. Keep actual deployment values in private runtime
+configuration; the public defaults remain unrestricted for other self-hosters.
+
+The backend applies this policy to initial owner setup, login, existing human
+sessions (including the owner), invitation creation/acceptance, password resets
+and changes, and every outgoing invitation/reset/test-email recipient. Matching
+is case-insensitive after trimming; subdomains, lookalike suffixes and wildcards
+are not implicitly accepted. Invalid configuration prevents startup. The policy
+cannot be changed through the admin panel or API. Machine credentials retain
+their separate project-scoped authentication.
+
+Existing outside-domain accounts and outstanding links become unusable while the
+restriction is enabled; records are not deleted. Verify the owner's email is in
+an allowed domain before enabling the setting. All API instances must use the
+same policy. This is an email-address admission rule; administrators remain
+responsible for identity checks and private invitation delivery. It does not
+add email-ownership verification or SSO.
+
+`/info` is a script-free public page explaining Maity's internal use and linking
+to the source and self-hosting guide. Restricted anonymous browser visits to `/`
+redirect there once the application loads its public policy. `/signin` provides
+the existing account flow, and new invitation/reset links use that path. Older
+root-fragment links remain supported by the UI. Denied account access redirects
+browsers to `/info`; API clients receive a JSON 403 with code
+`EMAIL_DOMAIN_NOT_ALLOWED` and `infoUrl: "/info"`. Admin attempts to address mail
+outside the allowlist fail without redirecting the administrator's page.
 
 ## Email and invitations
 

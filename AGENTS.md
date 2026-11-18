@@ -102,3 +102,12 @@ rather than describing configured checks as if they have already passed.
 The stock runtime has separate database, encryption-key and encrypted-backup
 volumes. Never substitute a new key when an existing database rejects it. Online
 master-key rotation and high availability are deferred; see docs/architecture.md.
+
+Optional `ALLOWED_EMAIL_DOMAINS` and `PUBLIC_OPERATOR_NAME` are deployment-owned.
+Use reserved example domains in tracked examples and tests; real hosting values
+stay in private runtime configuration. The policy covers every human/password
+admission and mail-recipient path, including existing sessions and links; machine
+identities retain separate authentication. Keep `/info` public and script-free,
+`/signin` available for the account flow, and API denials as JSON rather than HTML.
+Blank policy preserves ordinary self-hosted account admission. The allowlist does
+not verify email ownership; administrators remain responsible for invitations.

@@ -11,3 +11,5 @@ await build({
   define: { "process.env.NODE_ENV": '"production"' },
 });
 await copyFile("web/index.html", "dist/index.html");
+
+await copyFile("web/info.css", "dist/info.css");

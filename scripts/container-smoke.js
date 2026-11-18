@@ -80,6 +80,33 @@ try {
     if (value.value !== saved.value)
       throw new Error("Persistent data did not survive restart/restore.");
   } else {
+    const policy = await call("/instance");
+    if (!policy.restricted || policy.emailDomains.join(",") !== "example.com")
+      throw new Error("Container email policy was not configured.");
+    const publicPage = await fetch(base + "/info");
+    const publicHtml = await publicPage.text();
+    if (
+      !publicPage.ok ||
+      !publicHtml.includes("Example Team") ||
+      !publicHtml.includes("@example.com") ||
+      !publicHtml.includes("https://github.com/maity-co/secretManager")
+    )
+      throw new Error("Public information page failed.");
+    const signin = await fetch(base + "/signin");
+    if (!signin.ok) throw new Error("Sign-in route failed.");
+    const denied = await fetch(base + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "outside@elsewhere.example",
+        password: randomBytes(24).toString("base64url"),
+      }),
+    });
+    if (
+      denied.status !== 403 ||
+      (await denied.json()).code !== "EMAIL_DOMAIN_NOT_ALLOWED"
+    )
+      throw new Error("Container allowed an outside email address.");
     const setupToken = (await readFile("/keys/setup-token", "utf8")).trim();
     const ownerPassword = randomBytes(24).toString("base64url");
     await call("/bootstrap", "POST", {

@@ -26,6 +26,7 @@ provider/database diagnostics.
 | Secret history         | `GET /projects/:projectId/secrets/:id/versions`, `POST /projects/:projectId/secrets/:id/restore`                                                                        |
 | Import/export          | `POST /projects/:projectId/import/preview`, `POST /projects/:projectId/import`, `GET /projects/:projectId/export`                                                       |
 | Audit                  | `GET /audit` or `/audit?projectId=…&environment=…&path=…`                                                                                                               |
+| Public instance policy | `GET /instance`                                                                                                                                                         |
 | Health                 | `GET /health`                                                                                                                                                           |
 
 A machine login accepts `{clientId, clientSecret}` and returns a bearer token and
@@ -100,3 +101,14 @@ are UTF-8 text up to 64 KiB with no NUL. Imports are limited to 256 KiB and 500
 keys. Convert incompatible source quoting explicitly instead of silently changing
 values. Infisical migration uses these key/value files only; users, permissions,
 projects, environments and history are not imported.
+
+## Deployment email restrictions
+
+`GET /instance` is public and exposes only `restricted`, `emailDomains` and
+`operatorName`. It contains no authentication, bootstrap, mail or account data.
+The server also serves `/info` publicly and `/signin` as the explicit sign-in
+route. The policy is controlled by deployment configuration, never request fields.
+Outside-domain human access and old password-setup links receive JSON 403
+`{code: "EMAIL_DOMAIN_NOT_ALLOWED", infoUrl: "/info", error: "…"}`. Machine
+credentials are independent. The browser redirects known account denials to the
+public page; API clients are not redirected to HTML.

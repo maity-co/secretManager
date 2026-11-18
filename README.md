@@ -15,6 +15,8 @@ validate recovery on your own staging installation before moving live secrets.
   checks. Organization administration does not automatically grant secret access.
 - Password accounts, authenticator-app TOTP, single-use recovery codes, session
   revocation, account disabling and host-only owner recovery.
+- Optional Google sign-in with owner bootstrap, invitation acceptance and explicit
+  account linking; deployment can require Google for all human sessions.
 - Expiring, revocable invitations and password-reset links. Copy a link manually
   when email is absent or delivery fails. Password resets preserve existing MFA.
 - Resend configuration through the admin UI, authenticated API or deployment
@@ -72,7 +74,8 @@ Human login input contains `email`, `password`, and an authenticator/recovery
 `code`. Machine login input contains `clientId` and `clientSecret`. Initial human
 MFA enrollment is performed in the web UI. Sessions are saved in an owner-only
 local file and expire after eight hours for people or fifteen minutes for machines.
-Reauthenticate machines at the start of each job; reusable machine credentials
+Google sign-in is browser-only; Google-only installations use machine identities
+for CLI workloads. Reauthenticate machines at the start of each job; reusable machine credentials
 are not saved by the CLI.
 
 `get` and `export` intentionally write plaintext to stdout. `run` injects values

@@ -5,6 +5,7 @@ import { digest } from "./security.js";
 import { postgres, migrate } from "./db.js";
 import { createApp } from "./app.js";
 import { backupIntervalHours } from "./config.js";
+import { googleSettings } from "./google-auth.js";
 let db;
 async function main() {
   const backupHours = backupIntervalHours(process.env.BACKUP_INTERVAL_HOURS);
@@ -37,7 +38,23 @@ async function main() {
   const trustProxy = Number(process.env.TRUST_PROXY_HOPS || 0);
   if (![0, 1, 2].includes(trustProxy))
     throw new Error("TRUST_PROXY_HOPS must be 0, 1 or 2.");
+  if (
+    process.env.GOOGLE_ONLY &&
+    !["true", "false"].includes(process.env.GOOGLE_ONLY)
+  )
+    throw new Error("GOOGLE_ONLY must be true or false.");
+  const googleSecret = process.env.GOOGLE_CLIENT_SECRET_FILE
+    ? (await readFile(process.env.GOOGLE_CLIENT_SECRET_FILE, "utf8")).trim()
+    : process.env.GOOGLE_CLIENT_SECRET || "";
+  const google = googleSettings({
+    clientId: process.env.GOOGLE_CLIENT_ID || "",
+    clientSecret: googleSecret,
+    hostedDomain: process.env.GOOGLE_HOSTED_DOMAIN || "",
+    only: process.env.GOOGLE_ONLY === "true",
+    ownerEmail: process.env.BOOTSTRAP_OWNER_EMAIL || "",
+  });
   const app = await createApp({
+    google,
     db,
     masterKey: key,
     setupTokenHash: digest(setup),
@@ -57,6 +74,7 @@ async function main() {
     try {
       await db.transaction(async (tx) => {
         await tx.query("DELETE FROM sessions WHERE expires_at<now()");
+        await tx.query("DELETE FROM google_flows WHERE expires_at<now()");
         await tx.query(
           "DELETE FROM invitations WHERE expires_at<now()-interval '30 days'",
         );

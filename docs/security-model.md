@@ -33,8 +33,8 @@ MFA is required by default for all human accounts. Administrators can change the
 policy. An account with an enrolled factor always completes it at login even if
 organization-wide enforcement is disabled. TOTP accepts a one-step clock window,
 records the consumed counter transactionally and rejects replay. Replacing an
-enrolled factor requires the password and a valid current factor or unused
-recovery code. A password reset does not clear MFA. Keep server time accurate.
+enrolled factor requires the password (or a recent full Google login) and a valid
+current factor or unused recovery code. A password reset does not clear MFA. Keep server time accurate.
 
 Human sessions last eight hours, incomplete login sessions ten minutes, and
 machine tokens fifteen minutes. Machine authentication rechecks the original
@@ -91,3 +91,30 @@ There has been no independent penetration test or external cryptographic review.
 Do not interpret passing CI as certification, high availability or proof against
 all attacks. Before migrating operational secrets, review the implementation and
 exercise host recovery and isolated backup restoration on your intended platform.
+
+## Optional Google identity
+
+The server uses Google's authentication library for signature, issuer, audience
+and lifetime verification, then verifies nonce, authorized party, verified email
+and optional exact Workspace `hd` again. Signed Google `sub` is the persistent
+identity; email matches do not automatically link existing accounts. Authentication
+is an authorization-code flow with S256 PKCE, random state and nonce, a separate
+HttpOnly SameSite=Lax browser-binding cookie, and encrypted five-minute database
+state. Callback state is consumed once in a committed transaction before any
+provider call. Provider calls have ten-second deadlines and retries/redirects
+disabled; Google access/refresh/ID tokens are never persisted.
+
+Bootstrap still needs the protected setup token and optionally pinned owner email.
+Invitations remain single-use and email-bound. Existing account linking requires
+a full session, CSRF, password/current factor and matching Google email. Session
+revocation and disablement are rechecked before linking. Every resulting sign-in
+retains the authenticator requirement; Google does not confer project permissions.
+
+Google-only mode rejects old password sessions and all password APIs. Removing
+Google configuration rejects existing Google sessions. Replacing MFA after a
+Google login needs a full session no older than five minutes and an existing
+factor/recovery code; password-session replacement retains the password check.
+The ordinary session cookie stays SameSite=Strict. Public metadata exposes only
+Google availability/mode booleans. Callback query strings contain short-lived
+provider codes/state; suppress them in reverse-proxy access logs. See
+[operations](operations.md#google-sign-in) for recovery and migration limits.

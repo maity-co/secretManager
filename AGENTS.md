@@ -111,3 +111,13 @@ identities retain separate authentication. Keep `/info` public and script-free,
 `/signin` available for the account flow, and API denials as JSON rather than HTML.
 Blank policy preserves ordinary self-hosted account admission. The allowlist does
 not verify email ownership; administrators remain responsible for invitations.
+
+Optional Google authentication uses the official pinned Google library and an
+independent OIDC authorization-code/PKCE flow. Never copy another application's
+auth code, sessions or credentials into this repository. Real Google configuration
+is runtime-only. Preserve explicit account linking, setup-token/owner binding,
+invitation matching, backend domain checks, browser-bound single-use encrypted
+state and the existing authenticator requirement. Suppress callback query strings
+in ingress logs. Schema version 2 preserves version-1 data; rollback needs its
+matching backup. Google-only mode must reject old password sessions as well as
+password APIs. Human CLI login remains password-based; machine auth is unchanged.

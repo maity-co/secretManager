@@ -1,0 +1,49 @@
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+__pycache__/
+.venv/
+
+# Runtime configuration: only intentionally reviewed example files may be tracked
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+.runtime/
+.local/
+
+# Credentials and private runtime data
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+credentials.json
+secrets.json
+pgdata/
+data/
+backups/
+exports/
+*.dump
+*.backup
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+
+# Logs, recordings and potentially sensitive test artifacts
+*.log
+logs/
+playwright-report/
+test-results/
+traces/
+screenshots/
+
+# Editor and OS state
+.idea/
+.vscode/
+.DS_Store

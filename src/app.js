@@ -257,7 +257,7 @@ export async function createApp({
       !usingBearer &&
       !equal(req.get("x-csrf-token") || "", session.csrf)
     )
-      fail(403, "CSRF verification failed.");
+      throw new HttpError(403, "CSRF verification failed.", "CSRF_MISMATCH");
     let entity;
     if (session.actor_type === "user")
       entity = await first(

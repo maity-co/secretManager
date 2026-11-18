@@ -1,39 +1,21 @@
 import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import { createApi, SESSION_CHANGED_MESSAGE } from "./api.js";
 const initialLink = new URLSearchParams(location.hash.slice(1));
 const invitation = initialLink.get("invite"),
   reset = initialLink.get("reset");
 if (location.hash) history.replaceState(null, "", location.pathname);
 const googleFailed = initialLink.get("google") === "failed";
-let csrf = "";
+const api = createApi({
+  onRestricted: () => location.replace("/info"),
+  onReauthenticationRequired: () => location.replace("/signin"),
+  onSessionChanged: () =>
+    window.dispatchEvent(new CustomEvent("sm-session-changed")),
+});
 async function startGoogle(values = {}) {
   const result = await api("/auth/google/start", "POST", values);
   location.assign(result.url);
-}
-async function api(path, method = "GET", body) {
-  const response = await fetch("/api" + path, {
-    method,
-    credentials: "same-origin",
-    headers: {
-      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      "X-CSRF-Token": csrf,
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
-  const data = response.headers
-    .get("content-type")
-    ?.includes("application/json")
-    ? await response.json()
-    : await response.text();
-  if (!response.ok) {
-    if (data.code === "EMAIL_DOMAIN_NOT_ALLOWED") location.replace("/info");
-    if (data.code === "SESSION_REAUTH_REQUIRED" && csrf)
-      location.replace("/signin");
-    throw new Error(data.error || "Request failed.");
-  }
-  if (data.csrf) csrf = data.csrf;
-  return data;
 }
 const date = (value) => new Date(value).toLocaleString();
 function Field({ label, children, ...props }) {
@@ -173,6 +155,7 @@ function App() {
     [instance, setInstance] = useState(null),
     [boot, setBoot] = useState(false),
     [loading, setLoading] = useState(true),
+    [sessionChanged, setSessionChanged] = useState(false),
     [page, setPage] = useState("secrets"),
     [projects, setProjects] = useState([]),
     [canCreate, setCanCreate] = useState(false),
@@ -214,6 +197,19 @@ function App() {
       setBusy(false);
     }
   };
+  useEffect(() => {
+    const changed = () => {
+      setSessionChanged(true);
+      setUser(null);
+      setProjects([]);
+      setProjectId("");
+      setModal(null);
+      setEnrollment(null);
+      setRecovery(null);
+    };
+    window.addEventListener("sm-session-changed", changed);
+    return () => window.removeEventListener("sm-session-changed", changed);
+  }, []);
   async function identify() {
     try {
       const value = await api("/auth/me");
@@ -251,8 +247,8 @@ function App() {
   const showInfo =
     !!instance?.restricted && !user && !link && location.pathname !== "/signin";
   useEffect(() => {
-    if (!loading && showInfo) location.replace("/info");
-  }, [loading, showInfo]);
+    if (!loading && !sessionChanged && showInfo) location.replace("/info");
+  }, [loading, sessionChanged, showInfo]);
   useEffect(() => {
     if (!user || user.pending) return;
     api("/projects")
@@ -291,6 +287,23 @@ function App() {
       </button>
     </div>
   ) : null;
+  if (sessionChanged)
+    return (
+      <main className="auth">
+        <div className="auth-card" role="alert">
+          <Logo />
+          <h1>Reload to confirm your account</h1>
+          <p>{SESSION_CHANGED_MESSAGE}</p>
+          <p className="muted">
+            The rejected action was not retried. Use a separate browser profile
+            or private window to keep two accounts signed in.
+          </p>
+          <Button kind="primary" onClick={() => location.reload()}>
+            Reload workspace
+          </Button>
+        </div>
+      </main>
+    );
   if (loading || showInfo)
     return <div className="loading">Opening your workspace…</div>;
   if (!instance)

@@ -4,7 +4,10 @@ All endpoints are under `/api`. Requests that carry a body use JSON. Browser
 clients use same-origin cookies plus `X-CSRF-Token`; the token is returned by
 `GET /auth/me`. CLI/machine clients use `Authorization: Bearer …`. Never put
 application credentials in query strings (the Google callback uses the provider protocol described below). Authentication errors are bounded and redact
-provider/database diagnostics.
+provider/database diagnostics. A cookie mutation with an invalid CSRF token returns
+HTTP 403 with `code: "CSRF_MISMATCH"`. Clients should discard stale account state
+and ask the user to reload and confirm the active identity; never automatically
+retry a mutation after fetching the replacement session's CSRF token.
 
 Trusted-browser management uses `GET /auth/trusted-browsers`,
 `DELETE /auth/trusted-browsers/:id` and `DELETE /auth/trusted-browsers`.

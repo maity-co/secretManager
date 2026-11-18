@@ -47,6 +47,13 @@ HttpOnly, SameSite=Strict cookies; HTTPS installations use a Secure `__Host-`
 cookie. Browser mutations require a CSRF token, JSON content type and accepted
 origin. CLI/machine clients use opaque bearer tokens with server-side records.
 
+Tabs in one browser profile share a session cookie. Signing in as another user
+replaces that cookie while an older tab may retain its previous account and CSRF
+token in memory. A rejected CSRF check returns `CSRF_MISMATCH`; the UI hides the
+stale workspace, blocks further requests and asks for a reload to confirm the
+current account. It never refreshes the token and replays the rejected mutation.
+Use separate browser profiles or a private window for simultaneous accounts.
+
 Optional remembered-browser credentials are opaque random tokens, hashed at rest
 and bound to a keyed client-IP hash and user. An absolute 30-day expiry does not
 slide on login. Sessions issued with trust link to its database row: revocation

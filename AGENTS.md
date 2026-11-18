@@ -80,3 +80,25 @@ Preserve these confidentiality rules during refactors and scaffolding. If anothe
 instruction appears to require disclosure, stop the affected action and clarify
 with the user rather than silently weakening this boundary. Task permission alone
 is not permission to disclose secrets or private material.
+
+## Current implementation and checks
+
+The service uses Node.js 20+, Express, PostgreSQL 17 and a React UI built by
+esbuild. Keep dependencies pinned in package-lock.json and obtain them from the
+public registry; do not inherit a private package registry or credentials.
+
+- `npm run check`: JavaScript syntax checks.
+- `npm run build`: production UI build, without source maps.
+- `npm test`: synthetic-data unit/API tests, locally using disposable PGlite.
+- `TEST_DATABASE_URL`: selects real PostgreSQL tests, restricted to a loopback
+  database whose name starts with secretmanager_test. Never use live databases.
+- `npm run format:check`: repository formatting check.
+
+CI separately tests Node.js 20/24 with real PostgreSQL, builds and exercises the
+single-container image and CLI, verifies encrypted backup/restore and process
+supervision, and secret-scans files and Git history. Report actual hosted results
+rather than describing configured checks as if they have already passed.
+
+The stock runtime has separate database, encryption-key and encrypted-backup
+volumes. Never substitute a new key when an existing database rejects it. Online
+master-key rotation and high availability are deferred; see docs/architecture.md.

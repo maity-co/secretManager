@@ -1,0 +1,33 @@
+{
+  "name": "self-hosted-secret-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.js",
+    "start": "node src/server.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "check": "node scripts/check.js",
+    "format": "prettier --write src web scripts tests docs README.md SECURITY.md AGENTS.md compose.yaml .github/workflows/ci.yml package.json",
+    "format:check": "prettier --check src web scripts tests docs README.md SECURITY.md AGENTS.md compose.yaml .github/workflows/ci.yml package.json"
+  },
+  "dependencies": {
+    "cookie": "1.1.1",
+    "express": "5.3.0",
+    "helmet": "8.3.0",
+    "otpauth": "9.6.0",
+    "pg": "8.23.1",
+    "qrcode": "1.5.4",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.16",
+    "esbuild": "0.28.2",
+    "prettier": "3.10.1",
+    "supertest": "7.3.2"
+  }
+}

@@ -1,0 +1,64 @@
+# Architecture and scope
+
+The initial service is one organization per installation. Organization roles
+control project creation, account administration, organization-role management,
+email/authentication settings and organization audit access. Project roles control
+project metadata, environments, project roles, machines and secret operations.
+
+The owner is the installation's explicit superuser. There is exactly one owner;
+the network API cannot disable the owner, transfer ownership or reset the owner's
+MFA. A server operator can perform audited owner recovery through the CLI.
+
+## Authorization
+
+Bindings attach a role to a user or machine. Project bindings can constrain the
+role to one environment and a folder subtree. `/app` includes `/app/worker` but
+not `/application`. Missing assignments deny access. Machine identities belong
+to one project and cannot receive organization roles.
+
+Organization and project roles are separate records. The built-in organization
+Administrator manages organization administration without automatic access to
+project values. Built-in project Administrator, Writer and Reader roles are
+immutable examples; administrators can create, edit and delete custom roles.
+A Reader cannot export secrets unless a separate role explicitly grants export.
+
+Role management is delegated only at the entire relevant organization/project
+scope in this release. A person may only create or assign permissions they hold
+at the target scope. Editing a custom role also checks that complete permission
+set at the role's full scope, preventing escalation through existing assignments.
+Organization/project role changes take effect on the next request; permissions
+are not embedded in an access token.
+
+The API independently checks each secret's persisted project/environment/folder,
+including direct-ID reads, restore and history. Listing is exact-folder; subtree
+permission inheritance does not implicitly export every descendant folder.
+Folders are logical paths and exist as soon as a secret is stored at that path.
+
+## Storage and execution
+
+PostgreSQL owns users, roles, assignments, credentials, sessions, invitations,
+secret versions and audit events. Mutations and value-bearing reads run inside
+serializable transactions; audit insertion commits before a value is returned.
+Serialization conflicts receive bounded retries. Provider email is sent only after
+the invitation transaction commits, so delivery failure retains a usable link.
+
+Node.js serves the bundled UI and JSON API on one origin. Browser sessions use
+HttpOnly, SameSite=Strict cookies; HTTPS installations use a Secure `__Host-`
+cookie. Browser mutations require a CSRF token, JSON content type and accepted
+origin. CLI/machine clients use opaque bearer tokens with server-side records.
+
+The image starts PostgreSQL and Node under separate operating-system identities.
+PostgreSQL listens on a Unix socket only, with peer authentication. Tini and the
+entrypoint supervise both processes; one exiting stops the other. Only port 8080
+is exposed. A local reverse proxy owns public TLS.
+
+Database, encryption-key and encrypted-backup storage are separate volumes.
+Never mount the source checkout or private workspace into the running service.
+
+## Deferred
+
+Multi-organization tenancy, SSO, passkeys, workload OIDC, approval workflows,
+dynamic credentials, provider-side secret rotation, multi-node HA, offsite backup
+replication and master-key rotation are not implemented. Do not silently replace
+the master key. Runtime secret values and factors remain encrypted until read by
+the trusted server; this is not a zero-knowledge vault.

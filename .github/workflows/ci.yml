@@ -1,0 +1,105 @@
+name: Validation
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  tests:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 24]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: secretmanager_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d secretmanager_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:ci-only@127.0.0.1:5432/secretmanager_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --userconfig=/dev/null --registry=https://registry.npmjs.org
+      - run: npm run format:check
+      - run: npm run check
+      - run: npm run build
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
+  secrets:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify scanner and scan all reachable history
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz' | sha256sum --check
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks git . --redact --no-banner --log-opts=--all
+          /tmp/gitleaks dir . --redact --no-banner
+  container:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker build -t secretmanager:test .
+      - name: Start isolated container
+        run: docker run -d --name secretmanager-test --network none -e BACKUP_INTERVAL_HOURS=0 secretmanager:test
+      - name: Wait for service
+        run: |
+          for attempt in $(seq 1 60); do
+            if docker exec secretmanager-test node -e "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Exercise identities, CLI and encrypted persistence
+        run: docker exec -i secretmanager-test node --input-type=module < scripts/container-smoke.js
+      - name: Create encrypted PostgreSQL backup
+        run: docker exec --user secretmanager secretmanager-test node src/cli.js backup --file /backups/smoke.smbak
+      - name: Stop and restore in maintenance mode
+        run: |
+          docker stop secretmanager-test
+          docker run --rm --network none --volumes-from secretmanager-test secretmanager:test node src/cli.js restore --file /backups/smoke.smbak --confirm-replace
+          docker start secretmanager-test
+      - name: Verify restored data
+        run: |
+          for attempt in $(seq 1 60); do
+            if docker exec secretmanager-test node -e "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then break; fi
+            sleep 2
+          done
+          docker exec -i secretmanager-test node --input-type=module - --verify < scripts/container-smoke.js
+      - name: Verify audited host-only owner recovery
+        run: |
+          docker exec --user secretmanager secretmanager-test node src/cli.js owner-reset-link --url http://localhost:8080 --file /tmp/owner-recovery-link --reset-mfa
+          docker exec -i secretmanager-test node --input-type=module - --owner-recovery < scripts/container-smoke.js
+      - name: Verify supervision
+        run: |
+          test "$(docker inspect --format '{{.State.Running}}' secretmanager-test)" = true
+          set +e
+          docker exec --user postgres secretmanager-test pg_ctl -D /var/lib/postgresql/data stop -m fast -W
+          control_status=$?
+          set -e
+          # Supervision can stop the container before docker exec reports success.
+          if [ "$control_status" != 0 ] && [ "$control_status" != 137 ]; then exit "$control_status"; fi
+          test "$(docker wait secretmanager-test)" != 0
+      - name: Clean up disposable container and volumes
+        if: always()
+        run: docker rm -fv secretmanager-test

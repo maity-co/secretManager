@@ -1,0 +1,18 @@
+services:
+  secretmanager:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+    volumes:
+      - database:/var/lib/postgresql/data
+      - keys:/keys
+      - backups:/backups
+    restart: unless-stopped
+    stop_grace_period: 30s
+volumes:
+  database:
+  keys:
+  backups:

@@ -237,3 +237,26 @@ upgrade downtime. Do not share the same database volume between running
 containers. Health failure alone does not restart a container under ordinary
 Docker restart policies; monitor it. Exiting PostgreSQL or Node stops the whole
 container so the restart policy can act.
+
+## Publish a tested image
+
+Maintainers can manually run the **Validation** Actions workflow on `main` to
+publish an immutable source-tagged image. Ordinary push/PR runs never publish.
+The manual run repeats the full tests, container backup/recovery/supervision
+checks and file/history secret scans. It transfers the exact tested Docker image
+to a separate publication job; it does not rebuild after testing or snapshot a
+running test container. Runtime keys, databases and synthetic test volumes are
+not image inputs.
+
+The publication job alone has package-write permission. It rejects a source
+revision that is no longer current main, verifies OCI source/revision labels, and
+pushes `ghcr.io/<lowercase-owner>/<lowercase-repository>:sha-<source-sha>`.
+The run summary and `image-digest` artifact provide the pull reference to pin in
+your deployment system. No server deployment, DNS change or automatic promotion
+is performed.
+
+A newly created GHCR package may be private. Keep it private and configure an
+appropriate pull-only runtime identity, or explicitly make it public through the
+package settings if that is your intended distribution policy. The workflow does
+not change package visibility or copy existing registry credentials. Verify an
+actual digest pull from the destination before activating the service.

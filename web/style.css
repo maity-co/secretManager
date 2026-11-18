@@ -917,3 +917,12 @@ dialog {
     padding: 7px 10px;
   }
 }
+
+.trusted-browser-label {
+  display: block;
+  max-width: 600px;
+  overflow-wrap: anywhere;
+}
+.check input {
+  flex-shrink: 0;
+}

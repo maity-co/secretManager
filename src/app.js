@@ -24,6 +24,7 @@ import { parseEnv, formatEnv } from "./env-format.js";
 import { emailDomainPolicy } from "./email-policy.js";
 import { publicInfoPage } from "./info-page.js";
 import { googleProvider } from "./google-auth.js";
+import { trustedBrowsers } from "./trusted-browsers.js";
 
 export const ORG_PERMISSIONS = [
   "org.projects.create",
@@ -135,7 +136,9 @@ export async function createApp({
     : null;
   const secure = originUrl.protocol === "https:",
     cookieName = secure ? "__Host-sm_session" : "sm_session",
-    googleCookie = secure ? "__Host-sm_google" : "sm_google";
+    googleCookie = secure ? "__Host-sm_google" : "sm_google",
+    trustedCookie = secure ? "__Host-sm_trusted_browser" : "sm_trusted_browser";
+  const browsers = trustedBrowsers(masterKey, trustedCookie);
   const sessionCookie = (res, session) =>
     res.cookie(cookieName, session.raw, {
       httpOnly: true,
@@ -224,13 +227,31 @@ export async function createApp({
     const usingBearer = header?.startsWith("Bearer ");
     if (header && !usingBearer) fail(401, "Unsupported authentication scheme.");
     const raw = usingBearer ? header.slice(7) : cookies[cookieName];
-    if (!raw || raw.length > 256) fail(401, "Sign in required.");
+    if (!raw || raw.length > 256)
+      throw new HttpError(401, "Sign in required.", "SESSION_REAUTH_REQUIRED");
     const session = await first(
       tx,
       "SELECT * FROM sessions WHERE token_hash=$1 AND expires_at > now()",
       [digest(raw)],
     );
-    if (!session) fail(401, "Session expired or revoked.");
+    if (!session)
+      throw new HttpError(
+        401,
+        "Session expired or revoked. Sign in again.",
+        "SESSION_REAUTH_REQUIRED",
+      );
+    if (session.trusted_browser_id) {
+      const trusted =
+        session.actor_type === "user" && !usingBearer
+          ? await browsers.find(tx, session.actor_id, req)
+          : null;
+      if (!trusted || trusted.id !== session.trusted_browser_id)
+        throw new HttpError(
+          401,
+          "Browser trust changed or expired. Sign in with two-factor authentication again.",
+          "SESSION_REAUTH_REQUIRED",
+        );
+    }
     if (
       !["GET", "HEAD"].includes(req.method) &&
       !usingBearer &&
@@ -346,13 +367,24 @@ export async function createApp({
     kind = "full",
     credentialId = null,
     authMethod = "password",
+    trustedBrowserId = null,
   ) {
     const raw = token(),
       csrf = token(),
       until = expiry(type === "machine" ? 15 : kind === "pending" ? 10 : 480);
     await tx.query(
-      "INSERT INTO sessions (token_hash, actor_type, actor_id, kind, csrf, expires_at, credential_id, auth_method) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-      [digest(raw), type, actorId, kind, csrf, until, credentialId, authMethod],
+      "INSERT INTO sessions (token_hash, actor_type, actor_id, kind, csrf, expires_at, credential_id, auth_method, trusted_browser_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      [
+        digest(raw),
+        type,
+        actorId,
+        kind,
+        csrf,
+        until,
+        credentialId,
+        authMethod,
+        trustedBrowserId,
+      ],
     );
     return { raw, csrf, until, kind };
   }
@@ -367,6 +399,30 @@ export async function createApp({
       },
       cookie: delivery === "token" ? null : session,
     };
+  }
+  async function completeMfa(tx, actor, body, req, extra = {}) {
+    const trusted =
+      body.rememberBrowser === true && body.delivery !== "token"
+        ? await browsers.remember(tx, actor.id, req)
+        : null;
+    const result = sessionResult(
+      await issue(
+        tx,
+        actor.id,
+        "user",
+        "full",
+        null,
+        actor.session.auth_method,
+        trusted?.id || null,
+      ),
+      extra,
+      body.delivery,
+    );
+    if (trusted) {
+      result.trustedCookie = trusted;
+      await audit(tx, actor, "trusted_browser.created", {}, trusted.id);
+    }
+    return result;
   }
   function route(
     method,
@@ -383,6 +439,21 @@ export async function createApp({
         })) || { body: { ok: true } };
         if (result.after) await result.after(result);
         if (result.cookie) sessionCookie(res, result.cookie);
+        if (result.trustedCookie)
+          res.cookie(trustedCookie, result.trustedCookie.raw, {
+            httpOnly: true,
+            secure,
+            sameSite: "strict",
+            path: "/",
+            expires: result.trustedCookie.until,
+          });
+        if (result.clearTrustedCookie)
+          res.clearCookie(trustedCookie, {
+            httpOnly: true,
+            secure,
+            sameSite: "strict",
+            path: "/",
+          });
         if (result.googleCookie)
           res.cookie(googleCookie, result.googleCookie, {
             httpOnly: true,
@@ -489,6 +560,7 @@ export async function createApp({
       const action = body.action || "login";
       requireValue(["login", "bootstrap", "invite", "link"].includes(action));
       const context = { action };
+      if (action === "login") context.browserTrust = browsers.binding(req);
       if (action === "bootstrap") {
         const state = await first(
           tx,
@@ -661,6 +733,9 @@ export async function createApp({
             "DELETE FROM sessions WHERE actor_type='user' AND actor_id=$1",
             [user.id],
           );
+          await tx.query("DELETE FROM trusted_browsers WHERE user_id=$1", [
+            user.id,
+          ]);
           await audit(tx, { id: user.id, type: "user" }, "user.google.linked");
         } else {
           user = await first(
@@ -677,13 +752,36 @@ export async function createApp({
           tx,
           "SELECT require_mfa FROM service_state WHERE id=1",
         );
+        const trusted =
+          user.totp_box && context.action === "login"
+            ? await browsers.findBound(
+                tx,
+                user.id,
+                req,
+                context.browserTrust,
+                true,
+              )
+            : null;
+        if (trusted)
+          await audit(
+            tx,
+            actor,
+            "auth.trusted_browser.accepted",
+            {},
+            trusted.id,
+          );
         return issue(
           tx,
           user.id,
           "user",
-          user.totp_box || state.require_mfa ? "pending" : "full",
+          trusted
+            ? "full"
+            : user.totp_box || state.require_mfa
+              ? "pending"
+              : "full",
           null,
           "google",
+          trusted?.id || null,
         );
       });
       sessionCookie(res, session);
@@ -775,7 +873,7 @@ export async function createApp({
   route(
     "post",
     "/auth/login",
-    async (tx, actor, body) => {
+    async (tx, actor, body, req) => {
       if (google?.only) fail(403, "Use Google to sign in to this instance.");
       const email = normalizeEmail(body.email);
       if (!validEmail(email)) fail(401, "Invalid credentials.");
@@ -792,10 +890,34 @@ export async function createApp({
         tx,
         "SELECT require_mfa FROM service_state WHERE id=1",
       );
-      const kind = user.totp_box || state.require_mfa ? "pending" : "full";
+      const trusted =
+        user.totp_box && body.delivery !== "token"
+          ? await browsers.find(tx, user.id, req, true)
+          : null;
+      const kind = trusted
+        ? "full"
+        : user.totp_box || state.require_mfa
+          ? "pending"
+          : "full";
+      if (trusted)
+        await audit(
+          tx,
+          { id: user.id, type: "user" },
+          "auth.trusted_browser.accepted",
+          {},
+          trusted.id,
+        );
       await audit(tx, { id: user.id, type: "user" }, "auth.password.accepted");
       return sessionResult(
-        await issue(tx, user.id, "user", kind),
+        await issue(
+          tx,
+          user.id,
+          "user",
+          kind,
+          null,
+          "password",
+          trusted?.id || null,
+        ),
         { enrollmentRequired: !user.totp_box && kind === "pending" },
         body.delivery,
       );
@@ -869,7 +991,7 @@ export async function createApp({
   route(
     "post",
     "/auth/mfa/confirm",
-    async (tx, actor, body) => {
+    async (tx, actor, body, req) => {
       human(actor);
       const user = await first(
         tx,
@@ -899,26 +1021,18 @@ export async function createApp({
         "DELETE FROM sessions WHERE actor_type=$1 AND actor_id=$2",
         ["user", actor.id],
       );
+      await tx.query("DELETE FROM trusted_browsers WHERE user_id=$1", [
+        actor.id,
+      ]);
       await audit(tx, actor, "mfa.enrollment.confirmed");
-      return sessionResult(
-        await issue(
-          tx,
-          actor.id,
-          "user",
-          "full",
-          null,
-          actor.session.auth_method,
-        ),
-        { recoveryCodes: codes },
-        body.delivery,
-      );
+      return completeMfa(tx, actor, body, req, { recoveryCodes: codes });
     },
     { pending: true },
   );
   route(
     "post",
     "/auth/mfa/verify",
-    async (tx, actor, body) => {
+    async (tx, actor, body, req) => {
       human(actor);
       if (
         actor.session.kind !== "pending" ||
@@ -929,18 +1043,7 @@ export async function createApp({
         actor.session.token_hash,
       ]);
       await audit(tx, actor, "auth.mfa.accepted");
-      return sessionResult(
-        await issue(
-          tx,
-          actor.id,
-          "user",
-          "full",
-          null,
-          actor.session.auth_method,
-        ),
-        {},
-        body.delivery,
-      );
+      return completeMfa(tx, actor, body, req);
     },
     { pending: true },
   );
@@ -967,8 +1070,9 @@ export async function createApp({
       "user",
       actor.id,
     ]);
+    await tx.query("DELETE FROM trusted_browsers WHERE user_id=$1", [actor.id]);
     await audit(tx, actor, "user.password.changed");
-    return { clearCookie: true };
+    return { clearCookie: true, clearTrustedCookie: true };
   });
   route(
     "post",
@@ -1000,9 +1104,50 @@ export async function createApp({
       "user",
       actor.id,
     ]);
+    await tx.query("DELETE FROM trusted_browsers WHERE user_id=$1", [actor.id]);
     await audit(tx, actor, "user.sessions.revoked");
-    return { clearCookie: true };
+    return { clearCookie: true, clearTrustedCookie: true };
   });
+
+  route("get", "/auth/trusted-browsers", async (tx, actor, body, req) => {
+    human(actor);
+    return { body: { browsers: await browsers.list(tx, actor.id, req) } };
+  });
+  route("delete", "/auth/trusted-browsers", async (tx, actor) => {
+    human(actor);
+    await tx.query("DELETE FROM trusted_browsers WHERE user_id=$1", [actor.id]);
+    await audit(tx, actor, "trusted_browser.all_revoked");
+    const sessionRevoked = !!actor.session.trusted_browser_id;
+    return {
+      body: { sessionRevoked },
+      clearTrustedCookie: true,
+      clearCookie: sessionRevoked,
+    };
+  });
+  route(
+    "delete",
+    "/auth/trusted-browsers/:id",
+    async (tx, actor, body, req) => {
+      human(actor);
+      requireValue(validId(req.params.id));
+      const current = (await browsers.list(tx, actor.id, req)).some(
+        (row) => row.id === req.params.id && row.current,
+      );
+      const row = await first(
+        tx,
+        "DELETE FROM trusted_browsers WHERE id=$1 AND user_id=$2 RETURNING id",
+        [req.params.id, actor.id],
+      );
+      if (!row) fail(404, "Trusted browser not found.");
+      await audit(tx, actor, "trusted_browser.revoked", {}, row.id);
+      const sessionRevoked = actor.session.trusted_browser_id === row.id;
+      return {
+        body: { sessionRevoked },
+        clearTrustedCookie: current,
+        clearCookie: sessionRevoked,
+      };
+    },
+  );
 
   route("get", "/admin/users", async (tx, actor) => {
     await authorize(tx, actor, "org.users.manage");
@@ -1040,6 +1185,7 @@ export async function createApp({
       "user",
       user.id,
     ]);
+    await tx.query("DELETE FROM trusted_browsers WHERE user_id=$1", [user.id]);
     await audit(
       tx,
       actor,
@@ -1053,6 +1199,9 @@ export async function createApp({
     requireValue(validId(req.params.id));
     await tx.query("DELETE FROM sessions WHERE actor_type=$1 AND actor_id=$2", [
       "user",
+      req.params.id,
+    ]);
+    await tx.query("DELETE FROM trusted_browsers WHERE user_id=$1", [
       req.params.id,
     ]);
     await audit(tx, actor, "user.sessions.revoked", {}, req.params.id);
@@ -1167,6 +1316,7 @@ export async function createApp({
           "DELETE FROM sessions WHERE actor_type=$1 AND actor_id=$2",
           ["user", id],
         );
+        await tx.query("DELETE FROM trusted_browsers WHERE user_id=$1", [id]);
       }
       await tx.query("UPDATE invitations SET used=true WHERE id=$1", [
         invite.id,
@@ -2042,9 +2192,13 @@ export async function createApp({
   app.use((error, _req, res, _next) => {
     if (error.status && error.status >= 400 && error.status < 500)
       return res.status(error.status).json({
-        ...(error instanceof HttpError &&
-        error.code === "EMAIL_DOMAIN_NOT_ALLOWED"
-          ? { code: error.code, infoUrl: "/info" }
+        ...(error instanceof HttpError && error.code
+          ? {
+              code: error.code,
+              ...(error.code === "EMAIL_DOMAIN_NOT_ALLOWED"
+                ? { infoUrl: "/info" }
+                : {}),
+            }
           : {}),
         error:
           error.type === "entity.too.large"

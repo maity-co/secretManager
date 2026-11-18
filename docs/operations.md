@@ -143,6 +143,45 @@ while Google-only mode is enabled; keep/remove that file privately.
 The CLI's human login remains password-based. Google-only installations use machine
 identities for CLI/service automation; no Google tokens are copied into CLI files.
 
+## Trusted browsers
+
+After completing authenticator or recovery-code verification, people may select
+**Trust this browser for 30 days on this IP**. Trust is opt-in. Every new sign-in
+still requires the password or verified Google identity; the cookie alone never
+authenticates an account. Human CLI and machine authentication do not use this
+feature. First-time MFA enrollment and sensitive factor/password changes retain
+their existing verification requirements.
+
+The opaque HttpOnly cookie is Secure and host-only on HTTPS, SameSite=Strict, and
+expires after 30 days without sliding renewal. Server records contain only a
+token hash and keyed IP hash. The account and exact normalized client IP must
+match. A new network/VPN, missing cookie, expiry or revocation requires MFA again.
+Sessions linked to remembered access are also checked on every request and stop
+working when their browser credential or IP no longer matches.
+
+Only the configured proxy chain may supply client IP information. Configure
+`TRUST_PROXY_HOPS` accurately and prevent direct access around that proxy.
+Untrusted `X-Forwarded-For` headers must not determine the remembered IP.
+
+**Account security → Trusted browsers** lists expiry/last-use dates and supports
+forgetting one or all browsers. At most ten records are retained per account;
+remembering an eleventh forgets the least recently used record and its linked
+sessions. Ordinary Sign out keeps browser trust for the next sign-in. Forgetting
+a browser, clearing cookies, password changes/resets, MFA replacement, Google
+linking, account disablement, session revocation and host-owner recovery remove
+the applicable trust. Record removal also revokes its linked sessions.
+
+Google's cross-site callback does not receive the Strict cookie. The same-origin
+login start instead binds its hash and IP into the encrypted, browser-bound flow.
+The callback rechecks that binding only after verifying the Google identity.
+Account, IP, expiry and revocation are checked again; no raw trust cookie enters
+the redirect URL or application JSON responses.
+
+This reduces repeat prompts; it is not a hardware-bound factor. Password and fresh
+MFA checks still protect factor/password changes. See the
+[OWASP authentication guidance](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
+and [Express proxy configuration](https://expressjs.com/en/guide/behind-proxies/).
+
 ## Email and invitations
 
 Configure Resend in Settings or with `PUT /api/settings`. Stored keys are encrypted
@@ -226,9 +265,11 @@ the reset and enroll a new authenticator before using the workspace again.
 The entrypoint rejects PostgreSQL data from a different major version. PostgreSQL
 major upgrades require an explicit dump/restore or reviewed pg_upgrade procedure;
 changing the image tag is not a data migration. Schema startup refuses downgrades
-from a newer application schema. This release has schema version 2. Upgrading from version 1 adds optional Google
-identity/session metadata and encrypted temporary login flows transactionally;
-existing password accounts, role bindings and secrets are preserved. Older
+from a newer application schema. This release has schema version 3. Upgrading from
+version 1 adds optional Google identity/session metadata and encrypted temporary
+login flows; upgrading from version 2 adds trusted-browser records and nullable
+session links.
+Existing password accounts, sessions, role bindings and secrets are preserved. Older
 application versions refuse this schema. Rollback requires a pre-upgrade backup
 and the matching key, as described above.
 

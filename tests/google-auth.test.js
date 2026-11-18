@@ -764,7 +764,7 @@ test("existing schema version 1 identities and sessions migrate without losing s
     assert.equal(
       (await db.query("SELECT schema_version FROM service_state")).rows[0]
         .schema_version,
-      2,
+      3,
     );
     assert.equal(
       (
@@ -783,8 +783,105 @@ test("existing schema version 1 identities and sessions migrate without losing s
       ).rows[0],
       { permissions: ["secrets.read"], path: "/app" },
     );
-    await db.query("UPDATE service_state SET schema_version=3");
+    await db.query("UPDATE service_state SET schema_version=4");
     await assert.rejects(migrate(db), /newer/);
+  } finally {
+    await db.close();
+  }
+});
+
+test("Google browser trust survives a real cross-site callback without a Strict cookie", async () => {
+  const db = await isolatedDatabase(),
+    setup = token(),
+    googleClient = fakeGoogle();
+  await migrate(db);
+  const app = await createApp({
+    db,
+    masterKey: randomBytes(32),
+    setupTokenHash: digest(setup),
+    origin,
+    google: settings,
+    googleClient,
+    allowedEmailDomains: "company.example",
+    authLimit: 1000,
+    trustProxy: 1,
+  });
+  const owner = actor(app);
+  try {
+    const first = await begin(owner, {
+      action: "bootstrap",
+      setupToken: setup,
+      email: settings.ownerEmail,
+      name: "Owner",
+    });
+    await callback(owner, first);
+    await call(owner, "get", "/auth/me");
+    const enrollment = await call(owner, "post", "/auth/mfa/start", {});
+    const confirmed = await call(owner, "post", "/auth/mfa/confirm", {
+      code: authenticator(
+        settings.ownerEmail,
+        enrollment.body.manualKey,
+      ).generate(),
+      rememberBrowser: true,
+    });
+    const trustedCookie = confirmed.headers["set-cookie"]
+      .find((c) => c.startsWith("sm_trusted_browser="))
+      .split(";")[0];
+    const flow = await begin(owner);
+    const googleCookie = flow.response.headers["set-cookie"]
+      .find((c) => c.startsWith("sm_google="))
+      .split(";")[0];
+    // Browsers send the Lax flow cookie, but withhold the Strict trusted cookie
+    // on Google's cross-site redirect. Only server-bound flow state carries trust.
+    const response = await request(app)
+      .get("/api/auth/google/callback")
+      .set("Cookie", googleCookie)
+      .query({ state: flow.state, code: "synthetic-code" });
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.location, "/signin");
+    const sessionCookie = response.headers["set-cookie"]
+      .find((c) => c.startsWith("sm_session="))
+      .split(";")[0];
+    const me = await request(app)
+      .get("/api/auth/me")
+      .set("Cookie", [sessionCookie, trustedCookie]);
+    assert.equal(me.status, 200);
+    assert.equal(me.body.pending, false);
+    assert.equal(me.body.primaryMethod, "google");
+    const changedFlow = await begin(owner);
+    const changedCookie = changedFlow.response.headers["set-cookie"]
+      .find((c) => c.startsWith("sm_google="))
+      .split(";")[0];
+    const changed = await request(app)
+      .get("/api/auth/google/callback")
+      .set("Cookie", changedCookie)
+      .set("X-Forwarded-For", "203.0.113.22")
+      .query({ state: changedFlow.state, code: "synthetic-code" });
+    const changedSession = changed.headers["set-cookie"]
+      .find((c) => c.startsWith("sm_session="))
+      .split(";")[0];
+    const needsMfa = await request(app)
+      .get("/api/auth/me")
+      .set("Cookie", [changedSession, trustedCookie]);
+    assert.equal(needsMfa.status, 200);
+    assert.equal(needsMfa.body.pending, true);
+    const revokedFlow = await begin(owner);
+    const revokedCookie = revokedFlow.response.headers["set-cookie"]
+      .find((c) => c.startsWith("sm_google="))
+      .split(";")[0];
+    await call(owner, "delete", "/auth/trusted-browsers", {});
+    const revoked = await request(app)
+      .get("/api/auth/google/callback")
+      .set("Cookie", revokedCookie)
+      .query({ state: revokedFlow.state, code: "synthetic-code" });
+    const revokedSession = revoked.headers["set-cookie"]
+      .find((c) => c.startsWith("sm_session="))
+      .split(";")[0];
+    const revokedMe = await request(app)
+      .get("/api/auth/me")
+      .set("Cookie", [revokedSession, trustedCookie]);
+    assert.equal(revokedMe.status, 200);
+    assert.equal(revokedMe.body.pending, true);
   } finally {
     await db.close();
   }

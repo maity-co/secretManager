@@ -75,6 +75,7 @@ async function main() {
       await db.transaction(async (tx) => {
         await tx.query("DELETE FROM sessions WHERE expires_at<now()");
         await tx.query("DELETE FROM google_flows WHERE expires_at<now()");
+        await tx.query("DELETE FROM trusted_browsers WHERE expires_at<=now()");
         await tx.query(
           "DELETE FROM invitations WHERE expires_at<now()-interval '30 days'",
         );

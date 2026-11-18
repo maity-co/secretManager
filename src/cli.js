@@ -159,6 +159,9 @@ async function main() {
           "DELETE FROM sessions WHERE actor_type=$1 AND actor_id=$2",
           ["user", owner.id],
         );
+        await tx.query("DELETE FROM trusted_browsers WHERE user_id=$1", [
+          owner.id,
+        ]);
         await tx.query(
           "INSERT INTO invitations (id,email,token_hash,kind,user_id,expires_at) VALUES ($1,$2,$3,$4,$5,$6)",
           [

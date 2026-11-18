@@ -73,6 +73,12 @@ Prepare and validate changes for review. Do not merge pull requests, deploy,
 change live DNS, restart production services or publish releases/images without
 explicit user authorization for that action.
 
+The UI uses Maity's public logo and a shared dark/orange theme in
+`web/brand.css`. The production build copies `web/assets/` and the shared
+stylesheet into `dist/`; fonts and logos load from the same origin.
+[Branding provenance](docs/branding.md) records the public asset sources and font
+license. Sign out is a labelled topbar action, visible on mobile as well.
+
 ## Maintaining these instructions
 
 Keep this file in the repository root so future agents read it before editing.

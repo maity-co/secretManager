@@ -291,6 +291,20 @@ test("hosted email policy covers accounts, sessions, password links and every ma
         const signin = await request(restricted).get("/signin");
         assert.equal(signin.status, 200);
         assert.ok(signin.text.includes("/app.js"));
+        assert.ok(signin.text.includes("/brand.css"));
+        assert.ok(page.text.includes("/assets/maity-logo.png"));
+        assert.ok(!page.text.includes("<script"));
+        for (const [path, type] of [
+          ["/brand.css", "text/css"],
+          ["/assets/maity-logo.png", "image/png"],
+          ["/assets/maity-icon.png", "image/png"],
+          ["/assets/geist.woff2", "font/woff2"],
+        ]) {
+          const asset = await request(restricted).get(path);
+          assert.equal(asset.status, 200);
+          assert.ok(asset.headers["content-type"].startsWith(type));
+          assert.equal(asset.headers["cache-control"], "no-store");
+        }
         assert.equal(page.headers["cache-control"], "no-store");
       },
     );

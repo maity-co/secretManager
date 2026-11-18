@@ -47,6 +47,13 @@ HttpOnly, SameSite=Strict cookies; HTTPS installations use a Secure `__Host-`
 cookie. Browser mutations require a CSRF token, JSON content type and accepted
 origin. CLI/machine clients use opaque bearer tokens with server-side records.
 
+Tabs in one browser profile share a session cookie. Signing in as another user
+replaces that cookie while an older tab may retain its previous account and CSRF
+token in memory. A rejected CSRF check returns `CSRF_MISMATCH`; the UI hides the
+stale workspace, blocks further requests and asks for a reload to confirm the
+current account. It never refreshes the token and replays the rejected mutation.
+Use separate browser profiles or a private window for simultaneous accounts.
+
 The image starts PostgreSQL and Node under separate operating-system identities.
 PostgreSQL listens on a Unix socket only, with peer authentication. Tini and the
 entrypoint supervise both processes; one exiting stops the other. Only port 8080

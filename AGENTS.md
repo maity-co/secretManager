@@ -94,6 +94,11 @@ public registry; do not inherit a private package registry or credentials.
   database whose name starts with secretmanager_test. Never use live databases.
 - `npm run format:check`: repository formatting check.
 
+The browser request helper is in `web/api.js`, with synthetic fetch regression
+coverage in `tests/browser-api.test.js`. A `CSRF_MISMATCH` response blocks that
+client instance and replaces the workspace with a reload prompt. In-flight
+responses are discarded after the mismatch; rejected mutations are not replayed.
+
 CI separately tests Node.js 20/24 with real PostgreSQL, builds and exercises the
 single-container image and CLI, verifies encrypted backup/restore and process
 supervision, and secret-scans files and Git history. Report actual hosted results

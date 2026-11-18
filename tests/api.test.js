@@ -193,6 +193,50 @@ test("end-to-end authorization, identity and secret lifecycle", async (t) => {
           .set("Cookie", browser.cookie)
           .send({ name: "CSRF attempt" });
         assert.equal(noCsrf.status, 403);
+        assert.equal(noCsrf.body.code, "CSRF_MISMATCH");
+        const peer = await addUser("session-switch@example.com");
+        const otherBrowser = {};
+        await call(otherBrowser, "post", "/auth/login", {
+          email: peer.email,
+          password: peer.password,
+        });
+        await call(otherBrowser, "post", "/auth/mfa/verify", {
+          code: peer.codes[0],
+        });
+        // Another tab replaced the browser cookie, but this tab retains the
+        // previous account's in-memory CSRF token and workspace.
+        const staleTab = { cookie: otherBrowser.cookie, csrf: browser.csrf };
+        const mismatch = await call(
+          staleTab,
+          "post",
+          "/projects",
+          {
+            name: "Rejected Account Switch",
+          },
+          403,
+        );
+        assert.equal(mismatch.body.code, "CSRF_MISMATCH");
+        assert.equal(
+          (
+            await db.query("SELECT id FROM projects WHERE name=$1", [
+              "Rejected Account Switch",
+            ])
+          ).rows.length,
+          0,
+        );
+        const current = await call(staleTab, "get", "/auth/me");
+        assert.equal(current.body.email, peer.email);
+        const denied = await call(
+          staleTab,
+          "post",
+          "/projects",
+          {
+            name: "Still Not Authorized",
+          },
+          403,
+        );
+        assert.equal(denied.body.code, undefined);
+        await call(staleTab, "post", "/auth/logout", {});
         await call(
           browser,
           "post",

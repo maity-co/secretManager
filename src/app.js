@@ -236,7 +236,7 @@ export async function createApp({
       !usingBearer &&
       !equal(req.get("x-csrf-token") || "", session.csrf)
     )
-      fail(403, "CSRF verification failed.");
+      throw new HttpError(403, "CSRF verification failed.", "CSRF_MISMATCH");
     let entity;
     if (session.actor_type === "user")
       entity = await first(
@@ -2042,9 +2042,13 @@ export async function createApp({
   app.use((error, _req, res, _next) => {
     if (error.status && error.status >= 400 && error.status < 500)
       return res.status(error.status).json({
-        ...(error instanceof HttpError &&
-        error.code === "EMAIL_DOMAIN_NOT_ALLOWED"
-          ? { code: error.code, infoUrl: "/info" }
+        ...(error instanceof HttpError && error.code
+          ? {
+              code: error.code,
+              ...(error.code === "EMAIL_DOMAIN_NOT_ALLOWED"
+                ? { infoUrl: "/info" }
+                : {}),
+            }
           : {}),
         error:
           error.type === "entity.too.large"

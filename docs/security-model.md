@@ -50,6 +50,14 @@ are not a distributed defense. Place suitable network admission controls in
 front of a publicly reachable installation. Password hashing uses the bounded
 Node worker pool; do not expose the service without resource planning.
 
+A deployment can additionally restrict human account and email-recipient domains.
+This is checked before passwords are created/reset and before any provider call,
+and on every human session, including pending MFA sessions and the owner. It
+limits accepted addresses rather than proving ownership of an email address.
+Trusted administrators still control invitations and manual identity admission.
+Other self-hosters can choose their own allowlist or leave it unset. Existing
+outside-domain account data is retained but inaccessible under that policy.
+
 ## Data handling
 
 The service emits no request-body, credential or secret-value logs. Database

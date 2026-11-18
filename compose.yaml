@@ -6,6 +6,8 @@ services:
     environment:
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+      PUBLIC_OPERATOR_NAME: ${PUBLIC_OPERATOR_NAME:-}
     volumes:
       - database:/var/lib/postgresql/data
       - keys:/keys

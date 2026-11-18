@@ -21,7 +21,10 @@ async function api(path, method = "GET", body) {
     ?.includes("application/json")
     ? await response.json()
     : await response.text();
-  if (!response.ok) throw new Error(data.error || "Request failed.");
+  if (!response.ok) {
+    if (data.code === "EMAIL_DOMAIN_NOT_ALLOWED") location.replace("/info");
+    throw new Error(data.error || "Request failed.");
+  }
   if (data.csrf) csrf = data.csrf;
   return data;
 }
@@ -160,6 +163,7 @@ function Form({ submit, children, label = "Save", busy }) {
 }
 function App() {
   const [user, setUser] = useState(null),
+    [instance, setInstance] = useState(null),
     [boot, setBoot] = useState(false),
     [loading, setLoading] = useState(true),
     [page, setPage] = useState("secrets"),
@@ -209,11 +213,34 @@ function App() {
     }
   }
   useEffect(() => {
-    api("/bootstrap")
-      .then((value) => setBoot(value.required))
-      .catch((e) => setError(e.message));
-    identify();
+    let active = true;
+    Promise.all([
+      api("/instance"),
+      api("/bootstrap"),
+      api("/auth/me").catch(() => null),
+    ])
+      .then(([policy, bootstrap, account]) => {
+        if (active) {
+          setInstance(policy);
+          setBoot(bootstrap.required);
+          setUser(account);
+        }
+      })
+      .catch((error) => {
+        if (active) setError(error.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
+  const showInfo =
+    !!instance?.restricted && !user && !link && location.pathname !== "/signin";
+  useEffect(() => {
+    if (!loading && showInfo) location.replace("/info");
+  }, [loading, showInfo]);
   useEffect(() => {
     if (!user || user.pending) return;
     api("/projects")
@@ -252,7 +279,22 @@ function App() {
       </button>
     </div>
   ) : null;
-  if (loading) return <div className="loading">Opening your workspace…</div>;
+  if (loading || showInfo)
+    return <div className="loading">Opening your workspace…</div>;
+  if (!instance)
+    return (
+      <main className="auth">
+        <div className="auth-card">
+          <Logo />
+          <h1>Workspace unavailable</h1>
+          <p className="muted">
+            The instance policy could not be loaded. Reload to try again.
+          </p>
+          {errors}
+          <Button onClick={() => location.reload()}>Reload</Button>
+        </div>
+      </main>
+    );
   if (link)
     return (
       <main className="auth">
@@ -279,6 +321,10 @@ function App() {
                   name: data.get("name"),
                 });
                 setLink(null);
+                if (instance.restricted && location.pathname !== "/signin") {
+                  location.replace("/signin");
+                  return;
+                }
                 setNotice("Account updated. Sign in to continue.");
               })
             }
@@ -363,7 +409,9 @@ function App() {
               </>
             )}
             <Field
-              label="Email address"
+              label={
+                instance.restricted ? "Company email address" : "Email address"
+              }
               name="email"
               type="email"
               required
@@ -379,6 +427,16 @@ function App() {
               autoComplete={boot ? "new-password" : "current-password"}
             />
           </Form>
+          {instance.restricted && (
+            <p className="small muted">
+              This instance accepts{" "}
+              {instance.emailDomains.map((domain) => "@" + domain).join(", ")}{" "}
+              accounts only.
+            </p>
+          )}
+          <p className="small muted">
+            <a href="/info">About this instance &amp; self-hosting</a>
+          </p>
           <p className="small muted">
             No invitation email? Your administrator can share a single-use
             invitation link directly.

@@ -62,7 +62,7 @@ jobs:
           persist-credentials: false
       - run: docker build -t secretmanager:test .
       - name: Start isolated container
-        run: docker run -d --name secretmanager-test --network none -e BACKUP_INTERVAL_HOURS=0 secretmanager:test
+        run: docker run -d --name secretmanager-test --network none -e BACKUP_INTERVAL_HOURS=0 -e ALLOWED_EMAIL_DOMAINS=example.com -e PUBLIC_OPERATOR_NAME="Example Team" secretmanager:test
       - name: Wait for service
         run: |
           for attempt in $(seq 1 60); do

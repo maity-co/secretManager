@@ -183,7 +183,7 @@ async function main() {
           ],
         );
       });
-      await writeFile(filename, origin + "/#reset=" + raw + "\n", {
+      await writeFile(filename, origin + "/signin#reset=" + raw + "\n", {
         mode: 0o600,
       });
     } catch (error) {

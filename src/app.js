@@ -21,6 +21,8 @@ import {
   validId,
 } from "./security.js";
 import { parseEnv, formatEnv } from "./env-format.js";
+import { emailDomainPolicy } from "./email-policy.js";
+import { publicInfoPage } from "./info-page.js";
 
 export const ORG_PERMISSIONS = [
   "org.projects.create",
@@ -42,9 +44,10 @@ export const PROJECT_PERMISSIONS = [
   "secrets.export",
 ];
 class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 const fail = (status, message) => {
@@ -71,7 +74,29 @@ export async function createApp({
   fetchMail = fetch,
   authLimit = 30,
   trustProxy = 0,
+  allowedEmailDomains = "",
+  publicOperatorName = "",
 }) {
+  const emailPolicy = emailDomainPolicy(allowedEmailDomains);
+  if (
+    typeof publicOperatorName !== "string" ||
+    publicOperatorName.trim().length > 80 ||
+    /[\u0000-\u001f\u007f]/.test(publicOperatorName)
+  )
+    throw new Error("Invalid public operator name.");
+  const publicInstance = Object.freeze({
+    restricted: emailPolicy.restricted,
+    emailDomains: emailPolicy.domains,
+    operatorName: publicOperatorName.trim(),
+  });
+  function enforceEmail(email, redirect = false) {
+    if (!emailPolicy.permits(email))
+      throw new HttpError(
+        403,
+        "This account is not permitted on this instance.",
+        redirect ? "EMAIL_DOMAIN_NOT_ALLOWED" : undefined,
+      );
+  }
   const app = express(),
     crypto = vault(masterKey),
     originUrl = new URL(origin);
@@ -208,6 +233,7 @@ export async function createApp({
       );
     }
     if (!entity) fail(401, "Identity disabled or credential revoked.");
+    if (session.actor_type === "user") enforceEmail(entity.email, true);
     const actor = {
       ...entity,
       type: session.actor_type,
@@ -407,6 +433,7 @@ export async function createApp({
     };
   }
   async function sendMail(config, email, subject, text) {
+    if (!emailPolicy.permits(email)) return "recipient_not_allowed";
     if (!config.enabled || !config.key || !config.from) return "not_configured";
     try {
       const response = await fetchMail("https://api.resend.com/emails", {
@@ -425,6 +452,8 @@ export async function createApp({
       return "failed";
     }
   }
+
+  app.get("/api/instance", (_req, res) => res.json(publicInstance));
 
   route(
     "get",
@@ -465,6 +494,7 @@ export async function createApp({
         validEmail(email) && validName(body.name),
         "Valid name and email required.",
       );
+      enforceEmail(email, true);
       let password;
       try {
         password = await hashPassword(body.password);
@@ -493,8 +523,11 @@ export async function createApp({
     "post",
     "/auth/login",
     async (tx, actor, body) => {
+      const email = normalizeEmail(body.email);
+      if (!validEmail(email)) fail(401, "Invalid credentials.");
+      enforceEmail(email, true);
       const user = await first(tx, "SELECT * FROM users WHERE email=$1", [
-        normalizeEmail(body.email),
+        email,
       ]);
       const valid = await verifyPassword(
         body.password,
@@ -742,6 +775,7 @@ export async function createApp({
     await authorize(tx, actor, "org.users.manage");
     const email = normalizeEmail(body.email);
     requireValue(validEmail(email));
+    enforceEmail(email);
     const user = await first(tx, "SELECT id,owner FROM users WHERE email=$1", [
       email,
     ]);
@@ -771,7 +805,7 @@ export async function createApp({
       {},
       id,
     );
-    const url = origin + "/#" + kind + "=" + raw,
+    const url = origin + "/signin#" + kind + "=" + raw,
       config = await mailConfig(tx);
     return {
       body: { id, url, expiresAt: until, emailStatus: "not_requested" },
@@ -806,6 +840,20 @@ export async function createApp({
         [digest(body.token || "")],
       );
       if (!invite) fail(400, "Invalid or expired link.");
+      enforceEmail(invite.email, true);
+      if (invite.kind === "reset") {
+        const target = await first(
+          tx,
+          "SELECT email FROM users WHERE id=$1 FOR UPDATE",
+          [invite.user_id],
+        );
+        if (
+          !target ||
+          normalizeEmail(target.email) !== normalizeEmail(invite.email)
+        )
+          fail(400, "Invalid or expired link.");
+        enforceEmail(target.email, true);
+      }
       let password;
       try {
         password = await hashPassword(body.password);
@@ -917,6 +965,7 @@ export async function createApp({
     await authorize(tx, actor, "org.settings.manage");
     const email = normalizeEmail(body.email);
     requireValue(validEmail(email));
+    enforceEmail(email);
     const config = await mailConfig(tx);
     await audit(tx, actor, "mail.test.requested");
     return {
@@ -1694,10 +1743,19 @@ export async function createApp({
     res.status(404).json({ error: "API endpoint not found." }),
   );
   app.use(express.static(resolve("dist"), { index: false, etag: false }));
-  app.get("/", (_req, res) => res.sendFile(resolve("dist/index.html")));
+  app.get("/info", (_req, res) =>
+    res.type("html").send(publicInfoPage(publicInstance)),
+  );
+  app.get(["/", "/signin"], (_req, res) =>
+    res.sendFile(resolve("dist/index.html")),
+  );
   app.use((error, _req, res, _next) => {
     if (error.status && error.status >= 400 && error.status < 500)
       return res.status(error.status).json({
+        ...(error instanceof HttpError &&
+        error.code === "EMAIL_DOMAIN_NOT_ALLOWED"
+          ? { code: error.code, infoUrl: "/info" }
+          : {}),
         error:
           error.type === "entity.too.large"
             ? "Request too large."

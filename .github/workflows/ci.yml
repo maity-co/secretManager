@@ -155,8 +155,15 @@ jobs:
           trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
           current_revision=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
           test "$current_revision" = "$GITHUB_SHA"
-          docker push "$image_ref"
-          digest_ref=$(docker image inspect "$image_ref" --format '{{index .RepoDigests 0}}')
+          docker push "$image_ref" | tee "$RUNNER_TEMP/registry-push.log"
+          # Loaded images can retain an unqualified RepoDigests[0]. Use the
+          # registry's actual push result and verify its fully qualified ref.
+          mapfile -t pushed_digests < <(awk '{for(i=1;i<NF;i++) if($i=="digest:") print $(i+1)}' "$RUNNER_TEMP/registry-push.log")
+          test "${#pushed_digests[@]}" -eq 1
+          image_digest="${pushed_digests[0]}"
+          [[ "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          digest_ref="${image_ref%:*}@$image_digest"
+          docker manifest inspect "$digest_ref" > /dev/null
           printf '%s\n' "$digest_ref" > "$RUNNER_TEMP/tested-container-image/image-digest.txt"
           printf 'Published reviewed source %s as %s\n' "$GITHUB_SHA" "$digest_ref" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

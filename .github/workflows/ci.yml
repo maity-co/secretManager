@@ -86,6 +86,10 @@ jobs:
             sleep 2
           done
           docker exec -i secretmanager-test node --input-type=module - --verify < scripts/container-smoke.js
+      - name: Verify audited host-only owner recovery
+        run: |
+          docker exec --user secretmanager secretmanager-test node src/cli.js owner-reset-link --url http://localhost:8080 --file /tmp/owner-recovery-link --reset-mfa
+          docker exec -i secretmanager-test node --input-type=module - --owner-recovery < scripts/container-smoke.js
       - name: Verify supervision
         run: |
           test "$(docker inspect --format '{{.State.Running}}' secretmanager-test)" = true

@@ -39,7 +39,7 @@ outside this service. The owner account cannot be disabled through the API.
 | `RESEND_API_KEY`                   | Alternative runtime-injected email key; never a build argument    |
 | `EMAIL_FROM`                       | Plain sender email for deployment-managed email                   |
 | `BACKUP_DIRECTORY`                 | `/backups`; private encrypted archive destination                 |
-| `BACKUP_INTERVAL_HOURS`            | `24`; `0` disables scheduling                                     |
+| `BACKUP_INTERVAL_HOURS`            | `24`; `0` disables; otherwise 1–168 whole hours                   |
 
 The stock compose file passes the origin and proxy settings. Add other runtime
 settings in your private compose override or deployment system; do not commit

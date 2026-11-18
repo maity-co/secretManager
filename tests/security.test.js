@@ -1,3 +1,4 @@
+import { backupIntervalHours } from "../src/config.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
@@ -71,4 +72,12 @@ test("dotenv parser rejects ambiguous, malformed and oversized imports", () => {
     assert.throws(() => parseEnv(text));
   assert.throws(() => parseEnv("A=" + "x".repeat(65537)));
   assert.throws(() => parseEnv("A=\0"));
+});
+
+test("backup intervals reject millisecond-scale schedules and timer overflow", () => {
+  assert.equal(backupIntervalHours(undefined), 24);
+  assert.equal(backupIntervalHours("0"), 0);
+  assert.ok(backupIntervalHours("168") * 3600000 < 2147483647);
+  for (const value of ["0.0001", "-1", "169", "8760", "NaN", "Infinity"])
+    assert.throws(() => backupIntervalHours(value));
 });

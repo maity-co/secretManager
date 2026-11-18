@@ -30,7 +30,48 @@ async function call(path, method = "GET", body) {
   return data;
 }
 try {
-  if (process.argv.includes("--verify")) {
+  if (process.argv.includes("--owner-recovery")) {
+    const saved = JSON.parse(await readFile(file, "utf8"));
+    const revoked = await fetch(base + "/api/auth/me", {
+      headers: { Authorization: "Bearer " + saved.bearer },
+    });
+    if (revoked.status !== 401)
+      throw new Error("Owner sessions were not revoked.");
+    const link = new URL(
+      (await readFile("/tmp/owner-recovery-link", "utf8")).trim(),
+    );
+    const resetToken = new URLSearchParams(link.hash.slice(1)).get("reset");
+    const password = randomBytes(24).toString("base64url");
+    bearer = "";
+    await call("/accept-invitation", "POST", { token: resetToken, password });
+    const login = await call("/auth/login", "POST", {
+      email: "owner@example.com",
+      password,
+      delivery: "token",
+    });
+    if (!login.pending || !login.enrollmentRequired)
+      throw new Error("Owner recovery bypassed required MFA.");
+    const enrolled = await call("/auth/mfa/start", "POST", {});
+    const code = new OTPAuth.TOTP({
+      secret: OTPAuth.Secret.fromBase32(enrolled.manualKey),
+      algorithm: "SHA1",
+      digits: 6,
+      period: 30,
+    }).generate();
+    await call("/auth/mfa/confirm", "POST", { code, delivery: "token" });
+    const value = await call(
+      `/projects/${saved.projectId}/secrets/${saved.secretId}/value`,
+    );
+    if (value.value !== saved.value)
+      throw new Error("Owner recovery lost secret data.");
+    const events = await call("/audit");
+    if (
+      !events.events.some(
+        (event) => event.action === "owner.host_recovery.mfa_reset",
+      )
+    )
+      throw new Error("Host recovery audit event missing.");
+  } else if (process.argv.includes("--verify")) {
     const saved = JSON.parse(await readFile(file, "utf8"));
     bearer = saved.bearer;
     const value = await call(

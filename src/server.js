@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { digest } from "./security.js";
 import { postgres, migrate } from "./db.js";
 import { createApp } from "./app.js";
+import { backupIntervalHours } from "./config.js";
 let db;
 async function main() {
+  const backupHours = backupIntervalHours(process.env.BACKUP_INTERVAL_HOURS);
   const keyFile = process.env.MASTER_KEY_FILE || "/keys/master.key";
   const keyText = (await readFile(keyFile, "utf8")).trim();
   const key = Buffer.from(keyText, "base64");
@@ -65,9 +67,7 @@ async function main() {
     }
   }, 3600000);
   cleanup.unref();
-  const backupHours = Number(process.env.BACKUP_INTERVAL_HOURS ?? 24);
-  if (!Number.isFinite(backupHours) || backupHours < 0 || backupHours > 8760)
-    throw new Error("Invalid backup interval.");
+
   let backupChild = null;
   async function scheduledBackup() {
     if (backupChild) return;

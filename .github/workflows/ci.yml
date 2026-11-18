@@ -2,6 +2,7 @@ name: Validation
 on:
   push:
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -60,7 +61,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: docker build -t secretmanager:test .
+      - name: Build candidate with source identity
+        run: docker build --label org.opencontainers.image.source="https://github.com/${{ github.repository }}" --label org.opencontainers.image.revision="${{ github.sha }}" -t secretmanager:test .
       - name: Start isolated container
         run: docker run -d --name secretmanager-test --network none -e BACKUP_INTERVAL_HOURS=0 -e ALLOWED_EMAIL_DOMAINS=example.com -e PUBLIC_OPERATOR_NAME="Example Team" secretmanager:test
       - name: Wait for service
@@ -108,8 +110,58 @@ jobs:
             sleep 2
           done
           docker exec -i secretmanager-google-test node --input-type=module < scripts/google-container-smoke.js
+      - name: Save the exact tested image for manual publication
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        run: docker save secretmanager:test | gzip > "$RUNNER_TEMP/secretmanager-image.tar.gz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        with:
+          name: tested-container-image
+          path: ${{ runner.temp }}/secretmanager-image.tar.gz
+          retention-days: 1
+          if-no-files-found: error
       - name: Clean up disposable container and volumes
         if: always()
         run: |
           docker rm -fv secretmanager-test
           if docker container inspect secretmanager-google-test >/dev/null 2>&1; then docker rm -fv secretmanager-google-test; fi
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: [tests, secrets, container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: tested-container-image
+          path: ${{ runner.temp }}/tested-container-image
+      - name: Publish only the tested current-main image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_revision=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          test "$current_revision" = "$GITHUB_SHA"
+          gzip -dc "$RUNNER_TEMP/tested-container-image/secretmanager-image.tar.gz" | docker load
+          test "$(docker image inspect secretmanager:test --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          test "$(docker image inspect secretmanager:test --format '{{index .Config.Labels "org.opencontainers.image.source"}}')" = "https://github.com/$GITHUB_REPOSITORY"
+          image_ref="ghcr.io/${GITHUB_REPOSITORY,,}:sha-$GITHUB_SHA"
+          docker tag secretmanager:test "$image_ref"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          current_revision=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          test "$current_revision" = "$GITHUB_SHA"
+          docker push "$image_ref"
+          digest_ref=$(docker image inspect "$image_ref" --format '{{index .RepoDigests 0}}')
+          printf '%s\n' "$digest_ref" > "$RUNNER_TEMP/tested-container-image/image-digest.txt"
+          printf 'Published reviewed source %s as %s\n' "$GITHUB_SHA" "$digest_ref" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-digest
+          path: ${{ runner.temp }}/tested-container-image/image-digest.txt
+          if-no-files-found: error
+          retention-days: 30

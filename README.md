@@ -95,8 +95,9 @@ Local tests use disposable embedded PostgreSQL through PGlite. Set
 to run the same API suite against the real server. Never point tests at a live
 service database. CI exercises Node.js 20/24 with PostgreSQL 17 and independently
 builds the Docker image, tests human/machine CLI access, startup and persistence, performs a real encrypted
-backup/restore, and checks process supervision. CI does not deploy or publish an
-image. The public repository also runs a checksum-pinned Gitleaks scan.
+backup/restore, and checks process supervision. Push/PR CI does not deploy or publish an image. An explicitly dispatched
+Validation run on main can publish its exact tested image after every check
+passes; see [image publication](docs/operations.md#publish-a-tested-image). The public repository also runs a checksum-pinned Gitleaks scan.
 
 See [architecture](docs/architecture.md), [API](docs/api.md),
 [operations](docs/operations.md), and [security reporting](SECURITY.md).

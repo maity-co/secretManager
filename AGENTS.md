@@ -121,3 +121,10 @@ state and the existing authenticator requirement. Suppress callback query string
 in ingress logs. Schema version 2 preserves version-1 data; rollback needs its
 matching backup. Google-only mode must reject old password sessions as well as
 password APIs. Human CLI login remains password-based; machine auth is unchanged.
+
+Manual `workflow_dispatch` of Validation on current main can publish the exact
+image exercised by the successful container job, gated on every test and secret
+scan. Push/PR events never publish. Keep package-write permission confined to the
+publication job, verify source/revision labels and current main before pushing,
+and pin deployments by the returned digest. Image publication is separate from
+deployment and does not change package visibility or inject runtime credentials.

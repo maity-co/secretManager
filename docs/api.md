@@ -9,6 +9,16 @@ HTTP 403 with `code: "CSRF_MISMATCH"`. Clients should discard stale account stat
 and ask the user to reload and confirm the active identity; never automatically
 retry a mutation after fetching the replacement session's CSRF token.
 
+Trusted-browser management uses `GET /auth/trusted-browsers`,
+`DELETE /auth/trusted-browsers/:id` and `DELETE /auth/trusted-browsers`.
+After a valid MFA confirmation/challenge, `rememberBrowser: true` opts browser
+cookie delivery into a fixed 30-day trust record. Bearer-token delivery ignores
+that option. Device trust never replaces primary authentication. Returned metadata
+contains no raw cookie, token hash or IP hash. Revocation returns
+`sessionRevoked: true` when the caller's linked session was revoked.
+`SESSION_REAUTH_REQUIRED` (HTTP 401) tells the browser to return to sign-in without
+replaying a failed action.
+
 ## Main endpoints
 
 | Operation              | Endpoints                                                                                                                                                               |

@@ -9,6 +9,7 @@ if (location.hash) history.replaceState(null, "", location.pathname);
 const googleFailed = initialLink.get("google") === "failed";
 const api = createApi({
   onRestricted: () => location.replace("/info"),
+  onReauthenticationRequired: () => location.replace("/signin"),
   onSessionChanged: () =>
     window.dispatchEvent(new CustomEvent("sm-session-changed")),
 });
@@ -429,6 +430,9 @@ function App() {
           </div>
         </div>
         <div className="auth-card">
+          <div className="auth-mobile-brand">
+            <Logo />
+          </div>
           <div className="eyebrow">
             {boot ? "INITIAL SETUP" : "WORKSPACE ACCESS"}
           </div>
@@ -581,6 +585,7 @@ function App() {
                     signedIn(
                       await api("/auth/mfa/confirm", "POST", {
                         code: data.get("code"),
+                        rememberBrowser: data.get("rememberBrowser") === "on",
                       }),
                     ),
                   )
@@ -593,6 +598,7 @@ function App() {
                   autoComplete="one-time-code"
                   inputMode="numeric"
                 />
+                <RememberBrowser />
               </Form>
             </>
           ) : (
@@ -604,6 +610,7 @@ function App() {
                   signedIn(
                     await api("/auth/mfa/verify", "POST", {
                       code: data.get("code"),
+                      rememberBrowser: data.get("rememberBrowser") === "on",
                     }),
                   ),
                 )
@@ -615,6 +622,7 @@ function App() {
                 required
                 autoComplete="one-time-code"
               />
+              <RememberBrowser />
             </Form>
           )}
           <Button
@@ -632,6 +640,16 @@ function App() {
         </div>
       </main>
     );
+  const signOut = () =>
+    act(async () => {
+      await api("/auth/logout", "POST", {});
+      setUser(null);
+      setProjects([]);
+      setProjectId("");
+      setModal(null);
+      setEnrollment(null);
+      setRecovery(null);
+    });
   const projectScope = { projectId, environment, path };
   const rootProjectPermission = (permission) =>
     user.owner ||
@@ -664,72 +682,60 @@ function App() {
     <div className="layout">
       <aside className="sidebar">
         <Logo />
-        <div className="workspace-label">YOUR WORKSPACE</div>
-        <nav aria-label="Project navigation">
-          {[
-            ["secrets", "▦", "Secrets"],
-            ["access", "◈", "Project access"],
-            ["machines", "⌘", "Machine identities"],
-          ]
-            .filter(([id]) =>
-              id === "access"
-                ? rootProjectPermission("project.roles.manage")
-                : id === "machines"
-                  ? rootProjectPermission("project.machines.manage")
-                  : true,
-            )
-            .map(([id, icon, label]) => (
-              <button
-                key={id}
-                className={page === id ? "active" : ""}
-                onClick={() => setPage(id)}
-              >
-                <span>{icon}</span>
-                {label}
-              </button>
-            ))}
-        </nav>
-        <div className="workspace-label">ORGANIZATION</div>
-        <nav aria-label="Organization navigation">
-          {[
-            ["users", "♙", "People & invitations"],
-            ["roles", "◇", "Organization roles"],
-            ["audit", "≡", "Audit trail"],
-            ["settings", "⚙", "Settings"],
-            ["security", "◎", "Account security"],
-          ]
-            .filter(([id]) => navigationPermission(id))
-            .map(([id, icon, label]) => (
-              <button
-                key={id}
-                className={page === id ? "active" : ""}
-                onClick={() => setPage(id)}
-              >
-                <span>{icon}</span>
-                {label}
-              </button>
-            ))}
-        </nav>
+        <div className="sidebar-scroll">
+          <div className="workspace-label">YOUR WORKSPACE</div>
+          <nav aria-label="Project navigation">
+            {[
+              ["secrets", "▦", "Secrets"],
+              ["access", "◈", "Project access"],
+              ["machines", "⌘", "Machine identities"],
+            ]
+              .filter(([id]) =>
+                id === "access"
+                  ? rootProjectPermission("project.roles.manage")
+                  : id === "machines"
+                    ? rootProjectPermission("project.machines.manage")
+                    : true,
+              )
+              .map(([id, icon, label]) => (
+                <button
+                  key={id}
+                  className={page === id ? "active" : ""}
+                  onClick={() => setPage(id)}
+                >
+                  <span>{icon}</span>
+                  {label}
+                </button>
+              ))}
+          </nav>
+          <div className="workspace-label">ORGANIZATION</div>
+          <nav aria-label="Organization navigation">
+            {[
+              ["users", "♙", "People & invitations"],
+              ["roles", "◇", "Organization roles"],
+              ["audit", "≡", "Audit trail"],
+              ["settings", "⚙", "Settings"],
+              ["security", "◎", "Account security"],
+            ]
+              .filter(([id]) => navigationPermission(id))
+              .map(([id, icon, label]) => (
+                <button
+                  key={id}
+                  className={page === id ? "active" : ""}
+                  onClick={() => setPage(id)}
+                >
+                  <span>{icon}</span>
+                  {label}
+                </button>
+              ))}
+          </nav>
+        </div>
         <div className="sidebar-bottom">
           <div className="avatar">{user.name.slice(0, 1)}</div>
           <div>
             <strong>{user.name}</strong>
             <small>{user.owner ? "Owner" : user.email}</small>
           </div>
-          <button
-            className="logout"
-            aria-label="Sign out"
-            onClick={() =>
-              act(async () => {
-                await api("/auth/logout", "POST", {});
-                setUser(null);
-                setProjects([]);
-                setProjectId("");
-              })
-            }
-          >
-            ↗
-          </button>
         </div>
       </aside>
       <div className="main">
@@ -739,7 +745,12 @@ function App() {
             <span className="slash">/</span>
             <strong>{selected?.name || "Organization"}</strong>
           </div>
-          <Badge tone="green">● Self-hosted</Badge>
+          <div className="topbar-actions">
+            <Badge tone="green">● Self-hosted</Badge>
+            <Button onClick={signOut} disabled={busy}>
+              Sign out
+            </Button>
+          </div>
         </header>
         <main className="content">
           <div className="page-title">
@@ -1104,6 +1115,7 @@ function App() {
                 signedIn(
                   await api("/auth/mfa/confirm", "POST", {
                     code: data.get("code"),
+                    rememberBrowser: data.get("rememberBrowser") === "on",
                   }),
                 ),
               )
@@ -1121,13 +1133,32 @@ function App() {
     </div>
   );
 }
+function RememberBrowser() {
+  return (
+    <>
+      <label className="check">
+        <input type="checkbox" name="rememberBrowser" />
+        Trust this browser for 30 days on this IP
+      </label>
+      <p className="muted small">
+        Use only on a private device. You still sign in normally; a network
+        change or expired trust requires two-factor verification again.
+      </p>
+    </>
+  );
+}
+
 function Logo() {
   return (
-    <div className="logo">
-      <span className="logo-mark">S</span>
-      <strong>
-        Secret<span>Manager</span>
-      </strong>
+    <div className="logo" aria-label="SecretManager by Maity">
+      <img
+        className="brand-wordmark"
+        src="/assets/maity-logo.png"
+        width="124"
+        height="32"
+        alt="Maity"
+      />
+      <span className="brand-product">SecretManager</span>
     </div>
   );
 }
@@ -2162,6 +2193,12 @@ function Audit({ act, projects, user }) {
 }
 function Security({ user, act, setEnrollment, setModal, setUser }) {
   const data = useData(() => api("/auth/sessions"), [], act);
+  const [browserTick, setBrowserTick] = useState(0);
+  const trusted = useData(
+    () => api("/auth/trusted-browsers"),
+    [browserTick],
+    act,
+  );
   return (
     <>
       <Panel
@@ -2289,6 +2326,64 @@ function Security({ user, act, setEnrollment, setModal, setUser }) {
           </Form>
         </Panel>
       )}
+      <Panel
+        title="Trusted browsers"
+        description="Trust lasts at most 30 days on the same IP. Forgetting a browser also revokes sessions that relied on its trust."
+        action={
+          <Button
+            kind="danger"
+            onClick={() =>
+              act(async () => {
+                const result = await api(
+                  "/auth/trusted-browsers",
+                  "DELETE",
+                  {},
+                );
+                if (result.sessionRevoked) setUser(null);
+                else setBrowserTick((value) => value + 1);
+              })
+            }
+          >
+            Forget all browsers
+          </Button>
+        }
+      >
+        {trusted?.browsers.length ? (
+          trusted.browsers.map((browser) => (
+            <div className="list-row" key={browser.id}>
+              <div>
+                <strong className="trusted-browser-label">
+                  {browser.current ? "This browser" : browser.label}
+                </strong>
+                <small>
+                  Last used {date(browser.last_used_at)} · Expires{" "}
+                  {date(browser.expires_at)}
+                </small>
+              </div>
+              <Button
+                kind="danger quiet"
+                onClick={() =>
+                  act(async () => {
+                    const result = await api(
+                      "/auth/trusted-browsers/" + browser.id,
+                      "DELETE",
+                      {},
+                    );
+                    if (result.sessionRevoked) setUser(null);
+                    else setBrowserTick((value) => value + 1);
+                  })
+                }
+              >
+                Forget
+              </Button>
+            </div>
+          ))
+        ) : (
+          <Empty title="No trusted browsers">
+            Select the trust option when you complete two-factor verification.
+          </Empty>
+        )}
+      </Panel>
       <Panel
         title="Active sessions"
         action={

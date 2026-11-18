@@ -5,6 +5,7 @@ export function createApi({
   fetcher = (...args) => fetch(...args),
   onSessionChanged = () => {},
   onRestricted = () => {},
+  onReauthenticationRequired = () => {},
 } = {}) {
   let csrf = "";
   let blocked = false;
@@ -28,6 +29,8 @@ export function createApi({
     if (blocked) throw new Error(SESSION_CHANGED_MESSAGE);
     if (!response.ok) {
       if (data?.code === "EMAIL_DOMAIN_NOT_ALLOWED") onRestricted();
+      if (data?.code === "SESSION_REAUTH_REQUIRED" && csrf)
+        onReauthenticationRequired();
       if (
         response.status === 403 &&
         (data?.code === "CSRF_MISMATCH" ||

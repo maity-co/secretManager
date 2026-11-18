@@ -73,6 +73,21 @@ Prepare and validate changes for review. Do not merge pull requests, deploy,
 change live DNS, restart production services or publish releases/images without
 explicit user authorization for that action.
 
+The UI uses Maity's public logo and a shared dark/orange theme in
+`web/brand.css`. The production build copies `web/assets/` and the shared
+stylesheet into `dist/`; fonts and logos load from the same origin.
+[Branding provenance](docs/branding.md) records the public asset sources and font
+license. Sign out is a labelled topbar action, visible on mobile as well.
+
+Opt-in trusted browsers use opaque Secure/HttpOnly/SameSite=Strict cookies with
+a fixed 30-day lifetime and server-side token/keyed-IP hashes. Password or verified
+Google sign-in remains mandatory. Mint trust only after fresh MFA; never accept
+it for CLI/machine authentication or fresh-factor checks. Linked sessions are
+revoked when trust is forgotten or credentials change. Google binds trust inside
+the encrypted login flow before its cross-site callback. See
+[operations](docs/operations.md#trusted-browsers) and synthetic regression coverage
+in `tests/trusted-browsers.test.js`.
+
 ## Maintaining these instructions
 
 Keep this file in the repository root so future agents read it before editing.
@@ -123,7 +138,7 @@ auth code, sessions or credentials into this repository. Real Google configurati
 is runtime-only. Preserve explicit account linking, setup-token/owner binding,
 invitation matching, backend domain checks, browser-bound single-use encrypted
 state and the existing authenticator requirement. Suppress callback query strings
-in ingress logs. Schema version 2 preserves version-1 data; rollback needs its
+in ingress logs. Schema version 3 preserves version-1/2 data; rollback needs its
 matching backup. Google-only mode must reject old password sessions as well as
 password APIs. Human CLI login remains password-based; machine auth is unchanged.
 

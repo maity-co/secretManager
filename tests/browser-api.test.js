@@ -104,3 +104,38 @@ test("hosted email restriction keeps its information-page behavior", async () =>
   });
   assert.equal(restricted, 1);
 });
+
+test("trusted-session reauthentication redirects an identified browser without replay", async () => {
+  let calls = 0;
+  let redirects = 0;
+  const api = createApi({
+    fetcher: async () =>
+      ++calls === 1
+        ? json({ csrf: "synthetic-session" })
+        : json(
+            { code: "SESSION_REAUTH_REQUIRED", error: "Sign in required." },
+            401,
+          ),
+    onReauthenticationRequired: () => redirects++,
+  });
+  await api("/auth/me");
+  await assert.rejects(api("/projects", "POST", { name: "Example" }), {
+    message: "Sign in required.",
+  });
+  assert.equal(redirects, 1);
+  assert.equal(calls, 2);
+});
+
+test("an anonymous initial request does not cause a sign-in redirect loop", async () => {
+  let redirects = 0;
+  const api = createApi({
+    fetcher: async () =>
+      json(
+        { code: "SESSION_REAUTH_REQUIRED", error: "Sign in required." },
+        401,
+      ),
+    onReauthenticationRequired: () => redirects++,
+  });
+  await assert.rejects(api("/auth/me"), { message: "Sign in required." });
+  assert.equal(redirects, 0);
+});

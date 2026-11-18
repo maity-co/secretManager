@@ -41,8 +41,8 @@ export async function migrate(db) {
         "SELECT schema_version FROM service_state WHERE id=1 FOR UPDATE",
       )
     ).rows[0].schema_version;
-    if (version > 2)
+    if (version > 3)
       throw new Error("Database schema is newer than this application.");
-    await tx.query("UPDATE service_state SET schema_version = 2 WHERE id = 1");
+    await tx.query("UPDATE service_state SET schema_version = 3 WHERE id = 1");
   });
 }

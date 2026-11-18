@@ -100,6 +100,16 @@ jobs:
           # Supervision can stop the container before docker exec reports success.
           if [ "$control_status" != 0 ] && [ "$control_status" != 137 ]; then exit "$control_status"; fi
           test "$(docker wait secretmanager-test)" != 0
+      - name: Verify synthetic Google-only runtime without provider access
+        run: |
+          docker run -d --name secretmanager-google-test --network none -e BACKUP_INTERVAL_HOURS=0 -e ALLOWED_EMAIL_DOMAINS=example.com -e GOOGLE_CLIENT_ID=synthetic-client.apps.googleusercontent.com -e GOOGLE_CLIENT_SECRET=synthetic-client-secret-for-tests -e GOOGLE_HOSTED_DOMAIN=example.com -e GOOGLE_ONLY=true -e BOOTSTRAP_OWNER_EMAIL=owner@example.com secretmanager:test
+          for attempt in $(seq 1 60); do
+            if docker exec secretmanager-google-test node -e "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then break; fi
+            sleep 2
+          done
+          docker exec -i secretmanager-google-test node --input-type=module < scripts/google-container-smoke.js
       - name: Clean up disposable container and volumes
         if: always()
-        run: docker rm -fv secretmanager-test
+        run: |
+          docker rm -fv secretmanager-test
+          if docker container inspect secretmanager-google-test >/dev/null 2>&1; then docker rm -fv secretmanager-google-test; fi

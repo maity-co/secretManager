@@ -82,6 +82,67 @@ browsers to `/info`; API clients receive a JSON 403 with code
 `EMAIL_DOMAIN_NOT_ALLOWED` and `infoUrl: "/info"`. Admin attempts to address mail
 outside the allowlist fail without redirecting the administrator's page.
 
+## Google sign-in
+
+Create a Google OAuth client of type **Web application**. Register the exact
+redirect URI `https://secrets.example.com/api/auth/google/callback`, replacing
+the example origin with the installation's `APP_ORIGIN`. Only the `openid email`
+scopes are requested. See [Google's setup guide](https://developers.google.com/identity/openid-connect/openid-connect#settingup).
+
+Configure these settings only in private runtime storage:
+
+| Setting                     | Purpose                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `GOOGLE_CLIENT_ID`          | Web client ID                                                                                                |
+| `GOOGLE_CLIENT_SECRET_FILE` | Preferred: protected mounted client-secret file                                                              |
+| `GOOGLE_CLIENT_SECRET`      | Alternative runtime-injected secret; the file takes precedence                                               |
+| `GOOGLE_HOSTED_DOMAIN`      | Optional exact Google Workspace domain; verified against signed `hd` claims                                  |
+| `GOOGLE_ONLY`               | `true` disables all local password login/setup/reset paths, including old password sessions; default `false` |
+| `BOOTSTRAP_OWNER_EMAIL`     | Optional exact owner email, checked during password or Google bootstrap                                      |
+
+The stock Compose file passes environment-based Google configuration. To use a
+secret file, mount it privately and set `GOOGLE_CLIENT_SECRET_FILE` in a private
+Compose override. Never add real credentials to examples, build arguments or image
+layers. Partial/invalid configuration fails startup. Runtime policy cannot be
+changed through the admin UI or API. Leave all Google settings blank to retain
+ordinary password/TOTP self-hosting.
+
+For a restricted Workspace deployment, set both `ALLOWED_EMAIL_DOMAINS` and
+`GOOGLE_HOSTED_DOMAIN` to the intended domain, pin `BOOTSTRAP_OWNER_EMAIL`, and
+optionally enable `GOOGLE_ONLY=true`. The browser uses a server authorization-code
+flow. An ID token must have a verified email and authoritative Google ownership
+(Workspace `hd` or a Gmail address); a third-party Google-account email without
+`hd` is rejected. The allowlist is rechecked on every human request.
+
+On a fresh installation, open `/signin`, enter the setup token in the browser,
+choose the configured owner email/name, and continue with Google. The Google
+account must match that email. A successful callback creates the single owner
+without a local password and still requires authenticator enrollment and recovery
+code storage. All later Google sign-ins challenge the existing authenticator.
+
+Google does not enable open signup. Administrators issue the existing one-time
+invitation links; recipients choose their name and accept with the matching
+Google account. Revoked, expired, used and wrong-email invitations are rejected.
+Users receive no project access until an administrator grants it.
+
+An existing password account is never linked by matching email alone. Before
+enabling Google-only mode on an existing installation, each user signs in normally
+and uses **Security → Link Google account**, verifying their password and current
+factor. Google must return the same email. Linking revokes existing sessions and
+requires another authenticator challenge. Keep the original authentication mode
+until all needed accounts are linked.
+
+To replace an authenticator after Google login, sign in again, complete the current
+factor, then start replacement within five minutes using another current factor or
+unused recovery code. Google-only accounts use Google's own password recovery. If
+the owner loses its authenticator and all recovery codes, the trusted host-only
+`owner-reset-link --reset-mfa` operation below clears MFA; sign in with the linked
+Google identity and enroll again. Its generated password-reset link is unusable
+while Google-only mode is enabled; keep/remove that file privately.
+
+The CLI's human login remains password-based. Google-only installations use machine
+identities for CLI/service automation; no Google tokens are copied into CLI files.
+
 ## Email and invitations
 
 Configure Resend in Settings or with `PUT /api/settings`. Stored keys are encrypted
@@ -165,7 +226,11 @@ the reset and enroll a new authenticator before using the workspace again.
 The entrypoint rejects PostgreSQL data from a different major version. PostgreSQL
 major upgrades require an explicit dump/restore or reviewed pg_upgrade procedure;
 changing the image tag is not a data migration. Schema startup refuses downgrades
-from a newer application schema. This release has schema version 1.
+from a newer application schema. This release has schema version 2. Upgrading from version 1 adds optional Google
+identity/session metadata and encrypted temporary login flows transactionally;
+existing password accounts, role bindings and secrets are preserved. Older
+application versions refuse this schema. Rollback requires a pre-upgrade backup
+and the matching key, as described above.
 
 The current design is one active application/database instance, with brief
 upgrade downtime. Do not share the same database volume between running

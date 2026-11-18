@@ -5,7 +5,12 @@ const initialLink = new URLSearchParams(location.hash.slice(1));
 const invitation = initialLink.get("invite"),
   reset = initialLink.get("reset");
 if (location.hash) history.replaceState(null, "", location.pathname);
+const googleFailed = initialLink.get("google") === "failed";
 let csrf = "";
+async function startGoogle(values = {}) {
+  const result = await api("/auth/google/start", "POST", values);
+  location.assign(result.url);
+}
 async function api(path, method = "GET", body) {
   const response = await fetch("/api" + path, {
     method,
@@ -173,9 +178,14 @@ function App() {
     [environments, setEnvironments] = useState([]),
     [environment, setEnvironment] = useState("development"),
     [path, setPath] = useState("/"),
-    [error, setError] = useState(""),
+    [error, setError] = useState(
+      googleFailed
+        ? "Google sign-in failed. Use your invited account, or try again."
+        : "",
+    ),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
+    [passwordMode, setPasswordMode] = useState(false),
     [modal, setModal] = useState(null),
     [recovery, setRecovery] = useState(null),
     [enrollment, setEnrollment] = useState(null),
@@ -306,48 +316,83 @@ function App() {
               : "Reset your password."}
           </h1>
           <p className="muted">
-            Choose a strong password. Two-factor authentication will be required
-            at sign-in.
+            {instance.googleEnabled && !passwordMode && link.kind === "invite"
+              ? "Accept with your invited Google account, then connect an authenticator app."
+              : "Choose a strong password. Two-factor authentication will be required at sign-in."}
           </p>
           {errors}
-          <Form
-            busy={busy}
-            label="Save and sign in"
-            submit={(data) =>
-              act(async () => {
-                await api("/accept-invitation", "POST", {
-                  token: link.token,
-                  password: data.get("password"),
-                  name: data.get("name"),
-                });
-                setLink(null);
-                if (instance.restricted && location.pathname !== "/signin") {
-                  location.replace("/signin");
-                  return;
-                }
-                setNotice("Account updated. Sign in to continue.");
-              })
-            }
-          >
-            {link.kind === "invite" && (
-              <Field
-                label="Your name"
-                name="name"
-                required
-                maxLength="80"
-                autoComplete="name"
-              />
+          {instance.googleOnly && link.kind === "reset" ? (
+            <p>
+              Use Google account recovery, or contact your administrator for
+              authenticator recovery. <a href="/signin">Return to sign-in</a>
+            </p>
+          ) : (
+            <Form
+              busy={busy}
+              label={
+                instance.googleEnabled &&
+                !passwordMode &&
+                link.kind === "invite"
+                  ? "Accept with Google"
+                  : "Save and sign in"
+              }
+              submit={(data) =>
+                act(async () => {
+                  if (
+                    instance.googleEnabled &&
+                    !passwordMode &&
+                    link.kind === "invite"
+                  )
+                    return startGoogle({
+                      action: "invite",
+                      token: link.token,
+                      name: data.get("name"),
+                    });
+                  await api("/accept-invitation", "POST", {
+                    token: link.token,
+                    password: data.get("password"),
+                    name: data.get("name"),
+                  });
+                  setLink(null);
+                  if (instance.restricted && location.pathname !== "/signin") {
+                    location.replace("/signin");
+                    return;
+                  }
+                  setNotice("Account updated. Sign in to continue.");
+                })
+              }
+            >
+              {link.kind === "invite" && (
+                <Field
+                  label="Your name"
+                  name="name"
+                  required
+                  maxLength="80"
+                  autoComplete="name"
+                />
+              )}
+              {(!instance.googleEnabled ||
+                passwordMode ||
+                link.kind === "reset") && (
+                <Field
+                  label="New password · at least 14 characters"
+                  name="password"
+                  type="password"
+                  required
+                  minLength="14"
+                  maxLength="256"
+                  autoComplete="new-password"
+                />
+              )}
+            </Form>
+          )}
+          {instance.googleEnabled &&
+            !instance.googleOnly &&
+            link.kind === "invite" && (
+              <Button onClick={() => setPasswordMode(!passwordMode)}>
+                {passwordMode ? "Use Google instead" : "Use a password instead"}
+              </Button>
             )}
-            <Field
-              label="New password · at least 14 characters"
-              name="password"
-              type="password"
-              required
-              minLength="14"
-              maxLength="256"
-              autoComplete="new-password"
-            />
-          </Form>
         </div>
       </main>
     );
@@ -381,52 +426,88 @@ function App() {
           </p>
           {errors}
           {notice && <div className="message">{notice}</div>}
-          <Form
-            busy={busy}
-            label={boot ? "Initialize workspace" : "Continue"}
-            submit={(data) =>
-              act(async () =>
-                signedIn(
-                  await api(
-                    boot ? "/bootstrap" : "/auth/login",
-                    "POST",
-                    Object.fromEntries(data),
-                  ),
-                ),
-              )
-            }
-          >
-            {boot && (
-              <>
+          {instance.googleEnabled && !boot && !passwordMode && (
+            <Button
+              kind="primary"
+              disabled={busy}
+              onClick={() => act(() => startGoogle())}
+            >
+              Continue with Google
+            </Button>
+          )}
+          {(boot || !instance.googleEnabled || passwordMode) && (
+            <Form
+              busy={busy}
+              label={
+                boot && instance.googleEnabled && !passwordMode
+                  ? "Initialize with Google"
+                  : boot
+                    ? "Initialize workspace"
+                    : "Continue"
+              }
+              submit={(data) =>
+                act(async () => {
+                  if (boot && instance.googleEnabled && !passwordMode)
+                    return startGoogle({
+                      action: "bootstrap",
+                      ...Object.fromEntries(data),
+                    });
+                  return signedIn(
+                    await api(
+                      boot ? "/bootstrap" : "/auth/login",
+                      "POST",
+                      Object.fromEntries(data),
+                    ),
+                  );
+                })
+              }
+            >
+              {boot && (
+                <>
+                  <Field
+                    label="Setup token"
+                    name="setupToken"
+                    type="password"
+                    required
+                    autoComplete="off"
+                  />
+                  <Field
+                    label="Your name"
+                    name="name"
+                    required
+                    maxLength="80"
+                  />
+                </>
+              )}
+              <Field
+                label={
+                  instance.restricted
+                    ? "Company email address"
+                    : "Email address"
+                }
+                name="email"
+                type="email"
+                required
+                autoComplete="username"
+              />
+              {(!instance.googleEnabled || passwordMode) && (
                 <Field
-                  label="Setup token"
-                  name="setupToken"
+                  label="Password"
+                  name="password"
                   type="password"
                   required
-                  autoComplete="off"
+                  minLength={boot ? 14 : 1}
+                  maxLength="256"
+                  autoComplete={boot ? "new-password" : "current-password"}
                 />
-                <Field label="Your name" name="name" required maxLength="80" />
-              </>
-            )}
-            <Field
-              label={
-                instance.restricted ? "Company email address" : "Email address"
-              }
-              name="email"
-              type="email"
-              required
-              autoComplete="username"
-            />
-            <Field
-              label="Password"
-              name="password"
-              type="password"
-              required
-              minLength={boot ? 14 : 1}
-              maxLength="256"
-              autoComplete={boot ? "new-password" : "current-password"}
-            />
-          </Form>
+              )}
+            </Form>
+          )}
+          {instance.googleEnabled && !instance.googleOnly && (
+            <Button onClick={() => setPasswordMode(!passwordMode)}>
+              {passwordMode ? "Use Google instead" : "Use a password instead"}
+            </Button>
+          )}
           {instance.restricted && (
             <p className="small muted">
               This instance accepts{" "}
@@ -794,7 +875,12 @@ function App() {
                 Create identities scoped to an application’s project.
               </Empty>
             ))}
-          {page === "users" && <Users {...{ tick, act, setModal, refresh }} />}
+          {page === "users" && (
+            <Users
+              {...{ tick, act, setModal, refresh }}
+              googleOnly={instance.googleOnly}
+            />
+          )}
           {page === "settings" && <Settings {...{ tick, act, setNotice }} />}
           {page === "audit" && <Audit {...{ act, projects, user }} />}
           {page === "security" && (
@@ -1734,7 +1820,7 @@ function Machines({ projectId, tick, act, setModal, refresh }) {
     </Panel>
   );
 }
-function Users({ tick, act, setModal, refresh }) {
+function Users({ tick, act, setModal, refresh, googleOnly }) {
   const data = useData(() => api("/admin/users"), [tick], act);
   return (
     <>
@@ -1778,14 +1864,16 @@ function Users({ tick, act, setModal, refresh }) {
                     </td>
                     <td>
                       <div className="actions">
-                        <Button
-                          kind="quiet"
-                          onClick={() =>
-                            setModal({ kind: "invite", email: user.email })
-                          }
-                        >
-                          Reset password
-                        </Button>
+                        {!googleOnly && (
+                          <Button
+                            kind="quiet"
+                            onClick={() =>
+                              setModal({ kind: "invite", email: user.email })
+                            }
+                          >
+                            Reset password
+                          </Button>
+                        )}
                         <Button
                           kind="quiet"
                           onClick={() =>
@@ -2064,7 +2152,11 @@ function Security({ user, act, setEnrollment, setModal, setUser }) {
     <>
       <Panel
         title="Authenticator app"
-        description="Replacing your authenticator requires your password and a current code or unused recovery code."
+        description={
+          user.primaryMethod === "google"
+            ? "Sign in again with Google, then replace your authenticator within five minutes using a current code or recovery code."
+            : "Replacing your authenticator requires your password and a current code or unused recovery code."
+        }
       >
         <Badge tone={user.mfaEnabled ? "green" : ""}>
           {user.mfaEnabled
@@ -2088,13 +2180,15 @@ function Security({ user, act, setEnrollment, setModal, setUser }) {
         >
           {user.mfaEnabled && (
             <>
-              <Field
-                label="Current password"
-                name="password"
-                type="password"
-                required
-                autoComplete="current-password"
-              />
+              {user.primaryMethod !== "google" && (
+                <Field
+                  label="Current password"
+                  name="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                />
+              )}
               <Field
                 label="Current authenticator or recovery code"
                 name="code"
@@ -2105,45 +2199,82 @@ function Security({ user, act, setEnrollment, setModal, setUser }) {
           )}
         </Form>
       </Panel>
-      <Panel
-        title="Change password"
-        description="Changing your password revokes all existing sessions."
-      >
-        <Form
-          label="Change password"
-          submit={(form) =>
-            act(async () => {
-              await api("/auth/password", "POST", Object.fromEntries(form));
-              setUser(null);
-            })
-          }
+      {user.googleEnabled && (
+        <Panel
+          title="Google sign-in"
+          description="Existing password accounts must link Google explicitly after verifying their password and authenticator."
         >
-          <Field
-            label="Current password"
-            name="currentPassword"
-            type="password"
-            required
-            autoComplete="current-password"
-          />
-          <Field
-            label="New password · at least 14 characters"
-            name="password"
-            type="password"
-            required
-            minLength="14"
-            maxLength="256"
-            autoComplete="new-password"
-          />
-          {user.mfaEnabled && (
-            <Field
-              label="Authenticator or recovery code"
-              name="code"
-              required
-              autoComplete="one-time-code"
-            />
+          {user.googleLinked ? (
+            <Badge tone="green">Google account linked</Badge>
+          ) : (
+            <Form
+              label="Link Google account"
+              submit={(form) =>
+                act(() =>
+                  startGoogle({ action: "link", ...Object.fromEntries(form) }),
+                )
+              }
+            >
+              <Field
+                label="Current password"
+                name="password"
+                type="password"
+                required
+                autoComplete="current-password"
+              />
+              {user.mfaEnabled && (
+                <Field
+                  label="Authenticator or recovery code"
+                  name="code"
+                  required
+                  autoComplete="one-time-code"
+                />
+              )}
+            </Form>
           )}
-        </Form>
-      </Panel>
+        </Panel>
+      )}
+      {user.hasPassword && !user.googleOnly && (
+        <Panel
+          title="Change password"
+          description="Changing your password revokes all existing sessions."
+        >
+          <Form
+            label="Change password"
+            submit={(form) =>
+              act(async () => {
+                await api("/auth/password", "POST", Object.fromEntries(form));
+                setUser(null);
+              })
+            }
+          >
+            <Field
+              label="Current password"
+              name="currentPassword"
+              type="password"
+              required
+              autoComplete="current-password"
+            />
+            <Field
+              label="New password · at least 14 characters"
+              name="password"
+              type="password"
+              required
+              minLength="14"
+              maxLength="256"
+              autoComplete="new-password"
+            />
+            {user.mfaEnabled && (
+              <Field
+                label="Authenticator or recovery code"
+                name="code"
+                required
+                autoComplete="one-time-code"
+              />
+            )}
+          </Form>
+        </Panel>
+      )}
       <Panel
         title="Active sessions"
         action={

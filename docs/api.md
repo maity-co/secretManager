@@ -3,7 +3,7 @@
 All endpoints are under `/api`. Requests that carry a body use JSON. Browser
 clients use same-origin cookies plus `X-CSRF-Token`; the token is returned by
 `GET /auth/me`. CLI/machine clients use `Authorization: Bearer …`. Never put
-credentials in query strings. Authentication errors are bounded and redact
+application credentials in query strings (the Google callback uses the provider protocol described below). Authentication errors are bounded and redact
 provider/database diagnostics.
 
 ## Main endpoints
@@ -12,6 +12,7 @@ provider/database diagnostics.
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bootstrap              | `GET /bootstrap`, `POST /bootstrap`                                                                                                                                     |
 | Human authentication   | `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`                                                                                                                 |
+| Google authentication  | `POST /auth/google/start`, `GET /auth/google/callback`                                                                                                                  |
 | Authenticator          | `POST /auth/mfa/start`, `/auth/mfa/confirm`, `/auth/mfa/verify`                                                                                                         |
 | Password and sessions  | `POST /auth/password`, `GET /auth/sessions`, `DELETE /auth/sessions`                                                                                                    |
 | Machine authentication | `POST /auth/machine`                                                                                                                                                    |
@@ -105,10 +106,31 @@ projects, environments and history are not imported.
 ## Deployment email restrictions
 
 `GET /instance` is public and exposes only `restricted`, `emailDomains` and
-`operatorName`. It contains no authentication, bootstrap, mail or account data.
+`operatorName`, plus the boolean UI flags `googleEnabled` and `googleOnly`. It
+contains no client IDs/secrets, bootstrap tokens, mail settings or account data.
 The server also serves `/info` publicly and `/signin` as the explicit sign-in
 route. The policy is controlled by deployment configuration, never request fields.
 Outside-domain human access and old password-setup links receive JSON 403
 `{code: "EMAIL_DOMAIN_NOT_ALLOWED", infoUrl: "/info", error: "…"}`. Machine
 credentials are independent. The browser redirects known account denials to the
 public page; API clients are not redirected to HTML.
+
+## Google browser authentication
+
+`POST /auth/google/start` accepts `{action: "login"}` (the default),
+`{action: "bootstrap", setupToken, email, name}`,
+`{action: "invite", token, name}`, or
+`{action: "link", password, code}`. Linking requires an existing full human session
+and cookie CSRF verification. The response contains only `{url}` and sets an
+HttpOnly, five-minute SameSite=Lax flow cookie. Navigate the browser to that URL;
+never publish or log it. No session/bearer token is returned from these endpoints.
+
+Google redirects to `GET /auth/google/callback?code=…&state=…`. This is the only
+provider-protocol credential query endpoint. Proxies must suppress query strings
+for this callback in access logs. The server consumes the browser-bound state
+before token exchange, verifies PKCE and ID-token claims, then redirects to
+`/signin` with the ordinary SameSite=Strict session cookie. MFA remains pending.
+Denied domains redirect to `/info`; other failures redirect to
+`/signin#google=failed` without provider diagnostics. No arbitrary return URL is
+accepted. Google-only policy rejects password APIs and existing password sessions;
+machine authentication is unchanged.

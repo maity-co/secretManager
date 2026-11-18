@@ -65,3 +65,12 @@ CREATE TABLE IF NOT EXISTS audit_events (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS audit_project_time ON audit_events(project_id, created_at DESC);
+
+-- Version 2: optional Google identities and short-lived browser-bound login flows.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_subject text;
+CREATE UNIQUE INDEX IF NOT EXISTS google_subject_identity ON users(google_subject) WHERE google_subject IS NOT NULL;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS auth_method text NOT NULL DEFAULT 'password';
+CREATE TABLE IF NOT EXISTS google_flows (
+  token_hash text PRIMARY KEY, browser_hash text NOT NULL, box text NOT NULL,
+  expires_at timestamptz NOT NULL
+);

@@ -280,6 +280,8 @@ test("hosted email policy covers accounts, sessions, password links and every ma
           restricted: true,
           emailDomains: ["company.example"],
           operatorName: "Example Team",
+          googleEnabled: false,
+          googleOnly: false,
         });
         const page = await request(restricted).get("/info");
         assert.equal(page.status, 200);

@@ -23,6 +23,7 @@ import {
 import { parseEnv, formatEnv } from "./env-format.js";
 import { emailDomainPolicy } from "./email-policy.js";
 import { publicInfoPage } from "./info-page.js";
+import { googleProvider } from "./google-auth.js";
 
 export const ORG_PERMISSIONS = [
   "org.projects.create",
@@ -76,6 +77,8 @@ export async function createApp({
   trustProxy = 0,
   allowedEmailDomains = "",
   publicOperatorName = "",
+  google = null,
+  googleClient,
 }) {
   const emailPolicy = emailDomainPolicy(allowedEmailDomains);
   if (
@@ -88,6 +91,8 @@ export async function createApp({
     restricted: emailPolicy.restricted,
     emailDomains: emailPolicy.domains,
     operatorName: publicOperatorName.trim(),
+    googleEnabled: !!google,
+    googleOnly: !!google?.only,
   });
   function enforceEmail(email, redirect = false) {
     if (!emailPolicy.permits(email))
@@ -123,8 +128,22 @@ export async function createApp({
     throw new Error(
       "APP_ORIGIN must be an HTTPS origin or a loopback development origin.",
     );
+  if (google?.ownerEmail && !emailPolicy.permits(google.ownerEmail))
+    throw new Error("Bootstrap owner must satisfy the email policy.");
+  const googleAuth = google
+    ? googleProvider(google, origin, googleClient)
+    : null;
   const secure = originUrl.protocol === "https:",
-    cookieName = secure ? "__Host-sm_session" : "sm_session";
+    cookieName = secure ? "__Host-sm_session" : "sm_session",
+    googleCookie = secure ? "__Host-sm_google" : "sm_google";
+  const sessionCookie = (res, session) =>
+    res.cookie(cookieName, session.raw, {
+      httpOnly: true,
+      secure,
+      sameSite: "strict",
+      path: "/",
+      expires: session.until,
+    });
   app.disable("x-powered-by");
   app.set("trust proxy", trustProxy);
   app.use(
@@ -233,7 +252,14 @@ export async function createApp({
       );
     }
     if (!entity) fail(401, "Identity disabled or credential revoked.");
-    if (session.actor_type === "user") enforceEmail(entity.email, true);
+    if (session.actor_type === "user") {
+      enforceEmail(entity.email, true);
+      if (
+        (google?.only && session.auth_method !== "google") ||
+        (!googleAuth && session.auth_method === "google")
+      )
+        fail(401, "Sign in using the configured authentication method.");
+    }
     const actor = {
       ...entity,
       type: session.actor_type,
@@ -319,13 +345,14 @@ export async function createApp({
     type = "user",
     kind = "full",
     credentialId = null,
+    authMethod = "password",
   ) {
     const raw = token(),
       csrf = token(),
       until = expiry(type === "machine" ? 15 : kind === "pending" ? 10 : 480);
     await tx.query(
-      "INSERT INTO sessions (token_hash, actor_type, actor_id, kind, csrf, expires_at, credential_id) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-      [digest(raw), type, actorId, kind, csrf, until, credentialId],
+      "INSERT INTO sessions (token_hash, actor_type, actor_id, kind, csrf, expires_at, credential_id, auth_method) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+      [digest(raw), type, actorId, kind, csrf, until, credentialId, authMethod],
     );
     return { raw, csrf, until, kind };
   }
@@ -355,13 +382,14 @@ export async function createApp({
           return await fn(tx, actor, req.body || {}, req);
         })) || { body: { ok: true } };
         if (result.after) await result.after(result);
-        if (result.cookie)
-          res.cookie(cookieName, result.cookie.raw, {
+        if (result.cookie) sessionCookie(res, result.cookie);
+        if (result.googleCookie)
+          res.cookie(googleCookie, result.googleCookie, {
             httpOnly: true,
             secure,
-            sameSite: "strict",
+            sameSite: "lax",
             path: "/",
-            expires: result.cookie.until,
+            maxAge: 5 * 60000,
           });
         if (result.clearCookie)
           res.clearCookie(cookieName, {
@@ -453,6 +481,228 @@ export async function createApp({
     }
   }
 
+  route(
+    "post",
+    "/auth/google/start",
+    async (tx, _actor, body, req) => {
+      if (!googleAuth) fail(404, "Google sign-in is not configured.");
+      const action = body.action || "login";
+      requireValue(["login", "bootstrap", "invite", "link"].includes(action));
+      const context = { action };
+      if (action === "bootstrap") {
+        const state = await first(
+          tx,
+          "SELECT bootstrapped FROM service_state WHERE id=1",
+        );
+        if (
+          state.bootstrapped ||
+          typeof body.setupToken !== "string" ||
+          !equal(digest(body.setupToken), setupTokenHash)
+        )
+          fail(403, "Setup is unavailable or setup token is invalid.");
+        context.email = normalizeEmail(body.email);
+        context.name = body.name;
+        requireValue(
+          validEmail(context.email) && validName(context.name),
+          "Valid name and email required.",
+        );
+        enforceEmail(context.email, true);
+        if (google.ownerEmail && context.email !== google.ownerEmail)
+          fail(403, "Use the configured owner account.");
+      }
+      if (action === "invite") {
+        requireValue(
+          typeof body.token === "string" &&
+            body.token.length <= 256 &&
+            validName(body.name),
+        );
+        context.inviteHash = digest(body.token);
+        context.name = body.name;
+        const invitation = await first(
+          tx,
+          "SELECT email FROM invitations WHERE token_hash=$1 AND kind='invite' AND used=false AND expires_at>now()",
+          [context.inviteHash],
+        );
+        if (!invitation) fail(400, "Invalid or expired invitation.");
+        enforceEmail(invitation.email, true);
+      }
+      if (action === "link") {
+        const actor = await principal(tx, req);
+        human(actor);
+        if (actor.google_subject)
+          fail(409, "A Google account is already linked.");
+        if (
+          !(await verifyPassword(body.password, actor.password_hash)) ||
+          (actor.totp_box && !(await factor(tx, actor, body.code)))
+        )
+          fail(401, "Password and current factor required.");
+        context.actorId = actor.id;
+        context.sessionHash = actor.session.token_hash;
+      }
+      const flow = googleAuth.begin(),
+        browser = token();
+      await tx.query("DELETE FROM google_flows WHERE expires_at<=now()");
+      await tx.query(
+        "INSERT INTO google_flows (token_hash,browser_hash,box,expires_at) VALUES ($1,$2,$3,$4)",
+        [
+          digest(flow.state),
+          digest(browser),
+          crypto.seal(
+            JSON.stringify({
+              ...context,
+              nonce: flow.nonce,
+              verifier: flow.verifier,
+            }),
+            "google:" + digest(flow.state),
+          ),
+          expiry(5),
+        ],
+      );
+      return { body: { url: flow.url }, googleCookie: browser };
+    },
+    { anonymous: true },
+  );
+
+  app.get("/api/auth/google/callback", async (req, res) => {
+    res.clearCookie(googleCookie, {
+      httpOnly: true,
+      secure,
+      sameSite: "lax",
+      path: "/",
+    });
+    if (!googleAuth) return res.redirect(303, "/signin#google=failed");
+    let actor;
+    try {
+      const rawState = req.query.state,
+        browser = parseCookie(req.headers.cookie || "")[googleCookie];
+      if (
+        typeof rawState !== "string" ||
+        !/^[A-Za-z0-9_-]{43}$/.test(rawState) ||
+        typeof browser !== "string" ||
+        !/^[A-Za-z0-9_-]{43}$/.test(browser)
+      )
+        fail(400, "Invalid login state.");
+      // Consume before contacting Google, in a separate committed transaction.
+      // Provider errors, denied users and replay attempts cannot reuse the flow.
+      const flow = await db.transaction(async (tx) =>
+        first(
+          tx,
+          "DELETE FROM google_flows WHERE token_hash=$1 AND browser_hash=$2 AND expires_at>now() RETURNING box",
+          [digest(rawState), digest(browser)],
+        ),
+      );
+      if (!flow || req.query.error || typeof req.query.code !== "string")
+        fail(400, "Google sign-in failed.");
+      const context = JSON.parse(
+        crypto.open(flow.box, "google:" + digest(rawState)),
+      );
+      const identity = await googleAuth.identity(
+        req.query.code,
+        context.verifier,
+        context.nonce,
+      );
+      enforceEmail(identity.email, true);
+      const session = await db.transaction(async (tx) => {
+        let user;
+        if (context.action === "bootstrap") {
+          const state = await first(
+            tx,
+            "SELECT bootstrapped FROM service_state WHERE id=1 FOR UPDATE",
+          );
+          if (
+            state.bootstrapped ||
+            context.email !== identity.email ||
+            (google.ownerEmail && identity.email !== google.ownerEmail)
+          )
+            fail(403, "Owner setup rejected.");
+          user = { id: randomUUID(), type: "user", email: identity.email };
+          await tx.query(
+            "INSERT INTO users (id,email,name,password_hash,owner,google_subject) VALUES ($1,$2,$3,'!google',true,$4)",
+            [user.id, identity.email, context.name, identity.subject],
+          );
+          await tx.query(
+            "UPDATE service_state SET bootstrapped=true WHERE id=1",
+          );
+          await tx.query(
+            "INSERT INTO roles (id,name,permissions,builtin) VALUES ($1,'Administrator',$2,true)",
+            [randomUUID(), JSON.stringify(ORG_PERMISSIONS)],
+          );
+          await audit(tx, user, "service.initialized");
+        } else if (context.action === "invite") {
+          const invitation = await first(
+            tx,
+            "SELECT * FROM invitations WHERE token_hash=$1 AND kind='invite' AND used=false AND expires_at>now() FOR UPDATE",
+            [context.inviteHash],
+          );
+          if (!invitation || invitation.email !== identity.email)
+            fail(403, "Invitation does not match this Google account.");
+          user = { id: randomUUID(), type: "user", email: identity.email };
+          await tx.query(
+            "INSERT INTO users (id,email,name,password_hash,google_subject) VALUES ($1,$2,$3,'!google',$4)",
+            [user.id, identity.email, context.name, identity.subject],
+          );
+          await tx.query("UPDATE invitations SET used=true WHERE id=$1", [
+            invitation.id,
+          ]);
+          await audit(tx, user, "user.invite.accepted");
+        } else if (context.action === "link") {
+          user = await first(
+            tx,
+            "SELECT u.* FROM users u JOIN sessions s ON s.actor_id=u.id AND s.actor_type='user' WHERE u.id=$1 AND u.disabled=false AND s.token_hash=$2 AND s.kind='full' AND s.expires_at>now() FOR UPDATE OF u",
+            [context.actorId, context.sessionHash],
+          );
+          if (!user || user.email !== identity.email || user.google_subject)
+            fail(403, "Account linking rejected.");
+          await tx.query("UPDATE users SET google_subject=$2 WHERE id=$1", [
+            user.id,
+            identity.subject,
+          ]);
+          await tx.query(
+            "DELETE FROM sessions WHERE actor_type='user' AND actor_id=$1",
+            [user.id],
+          );
+          await audit(tx, { id: user.id, type: "user" }, "user.google.linked");
+        } else {
+          user = await first(
+            tx,
+            "SELECT * FROM users WHERE google_subject=$1 AND disabled=false",
+            [identity.subject],
+          );
+          if (!user || user.email !== identity.email)
+            fail(403, "Use an invited, linked Google account.");
+        }
+        actor = { id: user.id, type: "user" };
+        await audit(tx, actor, "auth.google.accepted");
+        const state = await first(
+          tx,
+          "SELECT require_mfa FROM service_state WHERE id=1",
+        );
+        return issue(
+          tx,
+          user.id,
+          "user",
+          user.totp_box || state.require_mfa ? "pending" : "full",
+          null,
+          "google",
+        );
+      });
+      sessionCookie(res, session);
+      return res.redirect(303, "/signin");
+    } catch (error) {
+      try {
+        await audit(db, actor, "auth.google.failed");
+      } catch {
+        /* No provider payloads or credentials in logs. */
+      }
+      return res.redirect(
+        303,
+        error.code === "EMAIL_DOMAIN_NOT_ALLOWED"
+          ? "/info"
+          : "/signin#google=failed",
+      );
+    }
+  });
+
   app.get("/api/instance", (_req, res) => res.json(publicInstance));
 
   route(
@@ -480,6 +730,7 @@ export async function createApp({
     "post",
     "/bootstrap",
     async (tx, actor, body) => {
+      if (google?.only) fail(403, "Use Google to initialize this instance.");
       const state = await first(
         tx,
         "SELECT * FROM service_state WHERE id=1 FOR UPDATE",
@@ -490,6 +741,8 @@ export async function createApp({
       )
         fail(403, "Setup is unavailable or setup token is invalid.");
       const email = normalizeEmail(body.email);
+      if (google?.ownerEmail && email !== google.ownerEmail)
+        fail(403, "Use the configured owner account.");
       requireValue(
         validEmail(email) && validName(body.name),
         "Valid name and email required.",
@@ -523,6 +776,7 @@ export async function createApp({
     "post",
     "/auth/login",
     async (tx, actor, body) => {
+      if (google?.only) fail(403, "Use Google to sign in to this instance.");
       const email = normalizeEmail(body.email);
       if (!validEmail(email)) fail(401, "Invalid credentials.");
       enforceEmail(email, true);
@@ -560,6 +814,11 @@ export async function createApp({
           email: actor.email,
           owner: actor.owner,
           mfaEnabled: !!actor.totp_box,
+          googleLinked: !!actor.google_subject,
+          primaryMethod: actor.session.auth_method,
+          hasPassword: actor.password_hash !== "!google",
+          googleOnly: !!google?.only,
+          googleEnabled: !!googleAuth,
           pending: actor.session.kind === "pending",
           csrf: actor.session.csrf,
           permissions: (
@@ -582,10 +841,18 @@ export async function createApp({
       human(actor);
       if (
         actor.totp_box &&
-        (!(await verifyPassword(body.password, actor.password_hash)) ||
+        (!(actor.session.auth_method === "google"
+          ? !!googleAuth &&
+            actor.session.kind === "full" &&
+            Date.now() - new Date(actor.session.created_at).getTime() <
+              5 * 60000
+          : await verifyPassword(body.password, actor.password_hash)) ||
           !(await factor(tx, actor, body.code)))
       )
-        fail(401, "Password and current factor required.");
+        fail(
+          401,
+          "Current factor and password or recent Google sign-in required.",
+        );
       const otp = authenticator(actor.email),
         seed = otp.secret.base32;
       await tx.query(
@@ -634,7 +901,14 @@ export async function createApp({
       );
       await audit(tx, actor, "mfa.enrollment.confirmed");
       return sessionResult(
-        await issue(tx, actor.id),
+        await issue(
+          tx,
+          actor.id,
+          "user",
+          "full",
+          null,
+          actor.session.auth_method,
+        ),
         { recoveryCodes: codes },
         body.delivery,
       );
@@ -655,12 +929,25 @@ export async function createApp({
         actor.session.token_hash,
       ]);
       await audit(tx, actor, "auth.mfa.accepted");
-      return sessionResult(await issue(tx, actor.id), {}, body.delivery);
+      return sessionResult(
+        await issue(
+          tx,
+          actor.id,
+          "user",
+          "full",
+          null,
+          actor.session.auth_method,
+        ),
+        {},
+        body.delivery,
+      );
     },
     { pending: true },
   );
   route("post", "/auth/password", async (tx, actor, body) => {
     human(actor);
+    if (google?.only || actor.password_hash === "!google")
+      fail(403, "This account uses Google sign-in.");
     if (
       !(await verifyPassword(body.currentPassword, actor.password_hash)) ||
       (actor.totp_box && !(await factor(tx, actor, body.code)))
@@ -780,6 +1067,8 @@ export async function createApp({
       email,
     ]);
     const kind = body.kind === "reset" ? "reset" : "invite";
+    if (google?.only && kind === "reset")
+      fail(403, "Google accounts use Google account recovery.");
     if ((kind === "invite" && user) || (kind === "reset" && !user))
       fail(
         400,
@@ -834,6 +1123,7 @@ export async function createApp({
     "post",
     "/accept-invitation",
     async (tx, actor, body) => {
+      if (google?.only) fail(403, "Accept your invitation with Google.");
       const invite = await first(
         tx,
         "SELECT * FROM invitations WHERE token_hash=$1 AND used=false AND expires_at>now() FOR UPDATE",

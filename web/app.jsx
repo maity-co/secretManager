@@ -1054,6 +1054,49 @@ function App() {
           </Form>
         </Dialog>
       )}
+      {modal?.kind === "credential" && (
+        <Dialog title="Issue machine credential" onClose={close}>
+          <p>
+            Issue a credential for <strong>{modal.machineName}</strong>.
+          </p>
+          <Form
+            busy={busy}
+            label="Issue credential"
+            submit={(data) =>
+              act(async () => {
+                const value = await api(
+                  "/projects/" +
+                    projectId +
+                    "/machines/" +
+                    modal.machineId +
+                    "/credentials",
+                  "POST",
+                  { days: Number(data.get("days")) },
+                );
+                refresh();
+                setModal({
+                  kind: "disclosure",
+                  title: "Machine credential · shown once",
+                  text: JSON.stringify(value, null, 2),
+                });
+              })
+            }
+          >
+            <Field label="Credential lifetime">
+              <select name="days" defaultValue="30">
+                <option value="30">30 days</option>
+                <option value="90">90 days</option>
+                <option value="365">365 days</option>
+                <option value="0">Until revoked (no expiration)</option>
+              </select>
+            </Field>
+            <p className="muted">
+              Credentials can be revoked at any time. Machine access tokens
+              still expire after 15 minutes.
+            </p>
+          </Form>
+        </Dialog>
+      )}
       {modal?.kind === "invite" && (
         <Dialog
           title={modal.email ? "Reset account password" : "Invite a teammate"}
@@ -1785,27 +1828,15 @@ function Machines({ projectId, tick, act, setModal, refresh }) {
               <div className="actions">
                 <Button
                   onClick={() =>
-                    act(async () => {
-                      const value = await api(
-                        "/projects/" +
-                          projectId +
-                          "/machines/" +
-                          machine.id +
-                          "/credentials",
-                        "POST",
-                        { days: 30 },
-                      );
-                      refresh();
-                      setModal({
-                        kind: "disclosure",
-                        title: "Machine credential · shown once",
-                        text: JSON.stringify(value, null, 2),
-                      });
+                    setModal({
+                      kind: "credential",
+                      machineId: machine.id,
+                      machineName: machine.name,
                     })
                   }
                   disabled={machine.disabled}
                 >
-                  Issue 30-day credential
+                  Issue credential
                 </Button>
                 <Button
                   kind="quiet"
@@ -1831,7 +1862,9 @@ function Machines({ projectId, tick, act, setModal, refresh }) {
                   <div>
                     <code>{row.id}</code>
                     <small>
-                      Expires {date(row.expires_at)}{" "}
+                      {row.expires_at === null
+                        ? "Until revoked"
+                        : `Expires ${date(row.expires_at)}`}{" "}
                       {row.revoked ? "· Revoked" : ""}
                     </small>
                   </div>

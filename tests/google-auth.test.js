@@ -764,7 +764,7 @@ test("existing schema version 1 identities and sessions migrate without losing s
     assert.equal(
       (await db.query("SELECT schema_version FROM service_state")).rows[0]
         .schema_version,
-      3,
+      4,
     );
     assert.equal(
       (
@@ -783,7 +783,7 @@ test("existing schema version 1 identities and sessions migrate without losing s
       ).rows[0],
       { permissions: ["secrets.read"], path: "/app" },
     );
-    await db.query("UPDATE service_state SET schema_version=4");
+    await db.query("UPDATE service_state SET schema_version=5");
     await assert.rejects(migrate(db), /newer/);
   } finally {
     await db.close();

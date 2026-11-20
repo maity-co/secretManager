@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS bindings (
 CREATE INDEX IF NOT EXISTS principal_bindings ON bindings(principal_type, principal_id);
 CREATE TABLE IF NOT EXISTS machine_credentials (
   id uuid PRIMARY KEY, machine_id uuid NOT NULL REFERENCES machines(id), secret_hash text NOT NULL UNIQUE,
-  expires_at timestamptz NOT NULL, revoked boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now()
+  expires_at timestamptz, revoked boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash text PRIMARY KEY, actor_type text NOT NULL CHECK (actor_type IN ('user', 'machine')),
@@ -85,3 +85,6 @@ CREATE TABLE IF NOT EXISTS trusted_browsers (
 CREATE INDEX IF NOT EXISTS trusted_browser_user ON trusted_browsers(user_id);
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS trusted_browser_id uuid REFERENCES trusted_browsers(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS trusted_browser_sessions ON sessions(trusted_browser_id) WHERE trusted_browser_id IS NOT NULL;
+
+-- Version 4: explicitly issued until-revoked machine credentials have no expiry.
+ALTER TABLE machine_credentials ALTER COLUMN expires_at DROP NOT NULL;

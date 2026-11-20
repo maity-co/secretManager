@@ -79,6 +79,25 @@ try {
     );
     if (value.value !== saved.value)
       throw new Error("Persistent data did not survive restart/restore.");
+    const machines = await call(`/projects/${saved.projectId}/machines`);
+    const credential = machines.credentials.find(
+      (row) => row.id === saved.credential.id,
+    );
+    if (!credential || credential.expires_at !== null)
+      throw new Error(
+        "Until-revoked credential did not survive restart/restore.",
+      );
+    await call("/auth/machine", "POST", {
+      clientId: saved.machine,
+      clientSecret: saved.credential.clientSecret,
+    });
+    const machineValue = await call(
+      `/projects/${saved.projectId}/secrets/${saved.secretId}/value`,
+    );
+    if (machineValue.value !== saved.value)
+      throw new Error(
+        "Restored machine credential could not read its scoped secret.",
+      );
   } else {
     const policy = await call("/instance");
     if (!policy.restricted || policy.emailDomains.join(",") !== "example.com")
@@ -164,8 +183,10 @@ try {
     const credential = await call(
       `/projects/${projectId}/machines/${machine}/credentials`,
       "POST",
-      { days: 1 },
+      { days: 0 },
     );
+    if (credential.expiresAt !== null)
+      throw new Error("Until-revoked credential expiry was not preserved.");
     await mkdir("/tmp/secretmanager-cli", { mode: 0o700 });
     const clientEnv = {
       ...process.env,
@@ -219,7 +240,14 @@ try {
     cli(["logout"]);
     await writeFile(
       file,
-      JSON.stringify({ bearer, projectId, secretId, value }),
+      JSON.stringify({
+        bearer,
+        projectId,
+        secretId,
+        value,
+        machine,
+        credential,
+      }),
       { mode: 0o600 },
     );
   }

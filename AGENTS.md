@@ -138,7 +138,7 @@ auth code, sessions or credentials into this repository. Real Google configurati
 is runtime-only. Preserve explicit account linking, setup-token/owner binding,
 invitation matching, backend domain checks, browser-bound single-use encrypted
 state and the existing authenticator requirement. Suppress callback query strings
-in ingress logs. Schema version 3 preserves version-1/2 data; rollback needs its
+in ingress logs. Schema version 4 preserves version-1/2/3 data; rollback needs its
 matching backup. Google-only mode must reject old password sessions as well as
 password APIs. Human CLI login remains password-based; machine auth is unchanged.
 
@@ -148,3 +148,14 @@ scan. Push/PR events never publish. Keep package-write permission confined to th
 publication job, verify source/revision labels and current main before pushing,
 and pin deployments by the returned digest. Image publication is separate from
 deployment and does not change package visibility or inject runtime credentials.
+
+Machine identities are persistent. Credential issuance defaults to 30 days and
+accepts explicit `days: 0` for until-revoked credentials (`expiresAt: null`). The
+schema-4 migration changes only credential expiry nullability; preserve existing
+timestamps, hashes and revocation flags. Every machine request must still check
+revocation and disablement, with expiry applied when present. Access tokens remain
+15 minutes. Both credential types count toward the five-active-credential limit,
+and only authorized humans may issue them. The UI keeps 30 days as its default; until-revoked issuance must be selected
+explicitly. It must not silently convert existing credentials. Synthetic API and
+migration coverage is in `tests/api.test.js` and
+`tests/credential-migration.test.js`.

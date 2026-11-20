@@ -589,7 +589,7 @@ test("trusted browsers require verified MFA, the same IP and revocable server st
         assert.equal(
           (await db.query("SELECT schema_version FROM service_state")).rows[0]
             .schema_version,
-          3,
+          4,
         );
         await call(owner, "get", "/auth/me");
         assert.equal(

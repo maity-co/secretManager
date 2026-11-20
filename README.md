@@ -23,7 +23,7 @@ validate recovery on your own staging installation before moving live secrets.
   settings, with encrypted stored API keys and a test-email action.
 - Optional deployment-only email domain restrictions for passwords, human access
   and all outgoing mail, with a public information/self-hosting page.
-- Per-project machine identities, overlapping expiring credentials, 15-minute
+- Per-project machine identities, overlapping expiring or until-revoked credentials, 15-minute
   access tokens, and immediate credential/identity revocation checks.
 - Secret versions, soft deletion and a 30-day recovery window; transactional
   `.env` preview/import and permission-controlled export.

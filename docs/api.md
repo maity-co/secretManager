@@ -44,10 +44,19 @@ replaying a failed action.
 | Health                 | `GET /health`                                                                                                                                                           |
 
 A machine login accepts `{clientId, clientSecret}` and returns a bearer token and
-expiry. Credentials default to 30 days; creation accepts `days` from 1 to 365,
-with at most five unrevoked, unexpired credentials per identity. Issue a second
-credential, update your workload, then revoke the old one. Identity disabling is
-independent of individual credential revocation.
+expiry. Machine identities themselves do not expire. Credentials default to 30
+days; creation accepts integer `days` from 1 to 365, or explicit `days: 0` for a
+credential that remains valid until revoked. Omitting `days` or passing `null`
+retains the 30-day default. Until-revoked creation returns `expiresAt: null`;
+existing credentials keep their original expiry dates.
+
+There are at most five active credentials per identity, including until-revoked
+credentials. Issue a second credential, update your workload, verify access, then
+revoke the old one. Revocation rejects both new logins and access tokens already
+issued with that credential. Disabling an identity also invalidates its sessions.
+All machine access tokens still expire after 15 minutes, regardless of credential
+lifetime. Issuing credentials requires a human with project machine-management
+permission; a machine cannot issue its own replacements.
 
 A human login accepts `{email, password}`. For CLI use, add `delivery: "token"`.
 If `pending` is true, complete `/auth/mfa/verify` with `{code, delivery: "token"}`

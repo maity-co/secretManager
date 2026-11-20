@@ -268,7 +268,7 @@ export async function createApp({
     else {
       entity = await first(
         tx,
-        "SELECT m.* FROM machines m JOIN machine_credentials c ON c.machine_id=m.id WHERE m.id=$1 AND m.disabled=false AND c.id=$2 AND c.revoked=false AND c.expires_at>now()",
+        "SELECT m.* FROM machines m JOIN machine_credentials c ON c.machine_id=m.id WHERE m.id=$1 AND m.disabled=false AND c.id=$2 AND c.revoked=false AND (c.expires_at IS NULL OR c.expires_at>now())",
         [session.actor_id, session.credential_id],
       );
     }
@@ -1801,19 +1801,19 @@ export async function createApp({
       if (!machine) fail(404, "Machine not found.");
       const days = body.days ?? 30;
       requireValue(
-        Number.isInteger(days) && days >= 1 && days <= 365,
-        "Credential lifetime must be 1–365 days.",
+        Number.isInteger(days) && days >= 0 && days <= 365,
+        "Credential lifetime must be 0 (until revoked) or 1–365 days.",
       );
       const count = await first(
         tx,
-        "SELECT count(*)::integer AS count FROM machine_credentials WHERE machine_id=$1 AND revoked=false AND expires_at>now()",
+        "SELECT count(*)::integer AS count FROM machine_credentials WHERE machine_id=$1 AND revoked=false AND (expires_at IS NULL OR expires_at>now())",
         [machine.id],
       );
       if (count.count >= 5)
         fail(409, "Revoke an old credential before creating another.");
       const id = randomUUID(),
         raw = token(),
-        until = expiry(days * 1440);
+        until = days === 0 ? null : expiry(days * 1440);
       await tx.query(
         "INSERT INTO machine_credentials (id,machine_id,secret_hash,expires_at) VALUES ($1,$2,$3,$4)",
         [id, machine.id, digest(raw), until],
@@ -1858,7 +1858,7 @@ export async function createApp({
         fail(401, "Invalid machine credentials.");
       const credential = await first(
         tx,
-        "SELECT c.* FROM machine_credentials c JOIN machines m ON m.id=c.machine_id WHERE c.machine_id=$1 AND c.secret_hash=$2 AND c.revoked=false AND c.expires_at>now() AND m.disabled=false",
+        "SELECT c.* FROM machine_credentials c JOIN machines m ON m.id=c.machine_id WHERE c.machine_id=$1 AND c.secret_hash=$2 AND c.revoked=false AND (c.expires_at IS NULL OR c.expires_at>now()) AND m.disabled=false",
         [body.clientId, digest(body.clientSecret)],
       );
       if (!credential) fail(401, "Invalid machine credentials.");

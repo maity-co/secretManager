@@ -34,6 +34,14 @@ including direct-ID reads, restore and history. Listing is exact-folder; subtree
 permission inheritance does not implicitly export every descendant folder.
 Folders are logical paths and exist as soon as a secret is stored at that path.
 
+Machine identity IDs are persistent. Credentials may have a fixed expiry or an
+explicit until-revoked lifetime; only credential expiry is nullable. Existing
+finite expiry timestamps are preserved by schema 4. Machine sessions always
+expire after 15 minutes, and every authenticated request rechecks credential
+revocation, applicable expiry and identity disablement. Both lifetime types count
+toward the five-active-credential limit. Rotation remains an explicit overlapping
+issue/update/revoke operation, without automatic renewal.
+
 ## Storage and execution
 
 PostgreSQL owns users, roles, assignments, credentials, sessions, invitations,

@@ -265,10 +265,15 @@ the reset and enroll a new authenticator before using the workspace again.
 The entrypoint rejects PostgreSQL data from a different major version. PostgreSQL
 major upgrades require an explicit dump/restore or reviewed pg_upgrade procedure;
 changing the image tag is not a data migration. Schema startup refuses downgrades
-from a newer application schema. This release has schema version 3. Upgrading from
+from a newer application schema. This release has schema version 4. Upgrading from
 version 1 adds optional Google identity/session metadata and encrypted temporary
 login flows; upgrading from version 2 adds trusted-browser records and nullable
-session links.
+session links. Upgrading from version 3 allows explicitly issued machine
+credentials without an expiry; existing credential timestamps, hashes and
+revocation state remain unchanged. The UI's **Issue credential** dialog offers
+finite lifetimes and **Until revoked (no expiration)**, with 30 days still selected
+by default. Until-revoked credentials require deliberate revocation or rotation;
+they do not change access-token lifetimes or grant additional permissions.
 Existing password accounts, sessions, role bindings and secrets are preserved. Older
 application versions refuse this schema. Rollback requires a pre-upgrade backup
 and the matching key, as described above.

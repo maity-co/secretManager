@@ -725,6 +725,284 @@ test("end-to-end authorization, identity and secret lifecycle", async (t) => {
       },
     );
     await t.test(
+      "until-revoked credentials retain scope and revoke existing sessions",
+      async () => {
+        const credential = (
+          await call(
+            owner,
+            "post",
+            `/projects/${projectId}/machines/${machineId}/credentials`,
+            { days: 0 },
+            201,
+          )
+        ).body;
+        assert.equal(credential.clientId, machineId);
+        assert.equal(credential.expiresAt, null);
+        const stored = (
+          await db.query(
+            "SELECT secret_hash,expires_at FROM machine_credentials WHERE id=$1",
+            [credential.id],
+          )
+        ).rows[0];
+        assert.equal(stored.expires_at, null);
+        assert.equal(stored.secret_hash, digest(credential.clientSecret));
+        assert.notEqual(stored.secret_hash, credential.clientSecret);
+        const reader = { bearer: null },
+          before = Date.now();
+        const session = await call(reader, "post", "/auth/machine", {
+          clientId: machineId,
+          clientSecret: credential.clientSecret,
+        });
+        assert.ok(
+          new Date(session.body.expiresAt).getTime() >= before + 15 * 60_000,
+        );
+        assert.ok(
+          new Date(session.body.expiresAt).getTime() <=
+            Date.now() + 15 * 60_000,
+        );
+        assert.equal(
+          (
+            await call(
+              reader,
+              "get",
+              `/projects/${projectId}/secrets/${secretId}/value`,
+            )
+          ).body.value,
+          plain,
+        );
+        for (const path of [
+          `/projects/${projectId}/secrets?environment=staging&path=/app`,
+          `/projects/${projectId}/secrets?environment=production&path=/other`,
+          `/projects/${otherProject}/secrets?environment=production&path=/app`,
+        ])
+          await call(reader, "get", path, undefined, 403);
+        await call(
+          reader,
+          "post",
+          `/projects/${projectId}/machines/${machineId}/credentials`,
+          { days: 0 },
+          403,
+        );
+        await db.query(
+          "UPDATE sessions SET expires_at=now()-interval '1 minute' WHERE credential_id=$1",
+          [credential.id],
+        );
+        await call(
+          reader,
+          "get",
+          `/projects/${projectId}/secrets/${secretId}/value`,
+          undefined,
+          401,
+        );
+        await call(reader, "post", "/auth/machine", {
+          clientId: machineId,
+          clientSecret: credential.clientSecret,
+        });
+        await call(
+          owner,
+          "delete",
+          `/projects/${projectId}/credentials/${credential.id}`,
+          {},
+        );
+        await call(
+          reader,
+          "get",
+          `/projects/${projectId}/secrets/${secretId}/value`,
+          undefined,
+          401,
+        );
+        await call(
+          null,
+          "post",
+          "/auth/machine",
+          { clientId: machineId, clientSecret: credential.clientSecret },
+          401,
+        );
+      },
+    );
+    await t.test(
+      "disabling an identity invalidates until-revoked credentials and sessions",
+      async () => {
+        const credential = (
+          await call(
+            owner,
+            "post",
+            `/projects/${projectId}/machines/${machineId}/credentials`,
+            { days: 0 },
+            201,
+          )
+        ).body;
+        const reader = { bearer: null };
+        await call(reader, "post", "/auth/machine", {
+          clientId: machineId,
+          clientSecret: credential.clientSecret,
+        });
+        await call(
+          owner,
+          "patch",
+          `/projects/${projectId}/machines/${machineId}`,
+          { disabled: true },
+        );
+        await call(
+          reader,
+          "get",
+          `/projects/${projectId}/secrets/${secretId}/value`,
+          undefined,
+          401,
+        );
+        await call(
+          null,
+          "post",
+          "/auth/machine",
+          { clientId: machineId, clientSecret: credential.clientSecret },
+          401,
+        );
+        await call(
+          owner,
+          "patch",
+          `/projects/${projectId}/machines/${machineId}`,
+          { disabled: false },
+        );
+        await call(
+          reader,
+          "get",
+          `/projects/${projectId}/secrets/${secretId}/value`,
+          undefined,
+          401,
+        );
+        await call(reader, "post", "/auth/machine", {
+          clientId: machineId,
+          clientSecret: credential.clientSecret,
+        });
+        await call(
+          owner,
+          "delete",
+          `/projects/${projectId}/credentials/${credential.id}`,
+          {},
+        );
+      },
+    );
+    await t.test(
+      "until-revoked credentials count toward the active-credential limit",
+      async () => {
+        const id = (
+          await call(
+            owner,
+            "post",
+            `/projects/${projectId}/machines`,
+            { name: "Credential limit fixture" },
+            201,
+          )
+        ).body.id;
+        const credentials = [];
+        for (let i = 0; i < 5; i++)
+          credentials.push(
+            (
+              await call(
+                owner,
+                "post",
+                `/projects/${projectId}/machines/${id}/credentials`,
+                { days: 0 },
+                201,
+              )
+            ).body,
+          );
+        await call(
+          owner,
+          "post",
+          `/projects/${projectId}/machines/${id}/credentials`,
+          { days: 0 },
+          409,
+        );
+        await call(
+          owner,
+          "post",
+          `/projects/${projectId}/machines/${id}/credentials`,
+          { days: 1 },
+          409,
+        );
+        await call(
+          owner,
+          "delete",
+          `/projects/${projectId}/credentials/${credentials[0].id}`,
+          {},
+        );
+        const expiring = (
+          await call(
+            owner,
+            "post",
+            `/projects/${projectId}/machines/${id}/credentials`,
+            { days: 1 },
+            201,
+          )
+        ).body;
+        await db.query(
+          "UPDATE machine_credentials SET expires_at=now()-interval '1 minute' WHERE id=$1",
+          [expiring.id],
+        );
+        await call(
+          owner,
+          "post",
+          `/projects/${projectId}/machines/${id}/credentials`,
+          { days: 0 },
+          201,
+        );
+        await call(
+          owner,
+          "post",
+          `/projects/${projectId}/machines/${id}/credentials`,
+          { days: 0 },
+          409,
+        );
+      },
+    );
+    await t.test(
+      "finite lifetimes and defaults are preserved alongside explicit non-expiry",
+      async () => {
+        const id = (
+          await call(
+            owner,
+            "post",
+            `/projects/${projectId}/machines`,
+            { name: "Credential lifetime fixture" },
+            201,
+          )
+        ).body.id;
+        for (const days of [-1, 366, 1.5, "0", false])
+          await call(
+            owner,
+            "post",
+            `/projects/${projectId}/machines/${id}/credentials`,
+            { days },
+            400,
+          );
+        for (const [body, days] of [
+          [{}, 30],
+          [{ days: null }, 30],
+          [{ days: 365 }, 365],
+        ]) {
+          const before = Date.now();
+          const credential = (
+            await call(
+              owner,
+              "post",
+              `/projects/${projectId}/machines/${id}/credentials`,
+              body,
+              201,
+            )
+          ).body;
+          assert.ok(
+            new Date(credential.expiresAt).getTime() >=
+              before + days * 86_400_000,
+          );
+          assert.ok(
+            new Date(credential.expiresAt).getTime() <=
+              Date.now() + days * 86_400_000,
+          );
+        }
+      },
+    );
+    await t.test(
       "invitations are single-use, revocable and work without email",
       async () => {
         const invite = await call(owner, "post", "/admin/invitations", {
